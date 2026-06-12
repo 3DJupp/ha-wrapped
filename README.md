@@ -57,8 +57,8 @@ pipx run --spec git+https://github.com/3DJupp/ha-wrapped ha-wrapped
 docker build -t ha-wrapped https://github.com/3DJupp/ha-wrapped.git
 docker run --rm -e HA_TOKEN -e ANTHROPIC_API_KEY -v "$PWD:/data" ha-wrapped
 
-# classic clone
-git clone https://github.com/3DJupp/ha-wrapped.git && cd ha-wrapped && pip install -r requirements.txt && cp config.example.yaml config.yaml && python3 wrapped.py
+# classic clone (venv — Debian/Ubuntu block system-wide pip, PEP 668)
+git clone https://github.com/3DJupp/ha-wrapped.git && cd ha-wrapped && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cp config.example.yaml config.yaml && .venv/bin/python wrapped.py
 ```
 
 Output: `ha_wrapped_<year>.html` in the current directory.
