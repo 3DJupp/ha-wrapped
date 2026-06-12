@@ -33,6 +33,34 @@ def iso(t: dt.datetime) -> str:
     return t.strftime("%Y-%m-%dT%H:%M:%S%z")
 
 
+def find_template() -> Path:
+    """Locate template.html next to the script or in an installed prefix."""
+    candidates = [
+        Path(__file__).resolve().parent / "template.html",
+        Path(sys.prefix) / "share" / "ha-wrapped" / "template.html",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    sys.exit("template.html not found (looked in: "
+             + ", ".join(str(p) for p in candidates) + ")")
+
+
+def check_api(ha_url: str, token: str) -> str:
+    """Ping the HA REST API; returns the API message or exits with help."""
+    try:
+        r = requests.get(f"{ha_url.rstrip('/')}/api/",
+                         headers={"Authorization": f"Bearer {token}"},
+                         timeout=15)
+    except requests.RequestException as e:
+        sys.exit(f"  [FAIL] cannot reach {ha_url}: {e}")
+    if r.status_code == 401:
+        sys.exit("  [FAIL] HA rejected the token (401). Create a new "
+                 "long-lived access token in your HA profile.")
+    r.raise_for_status()
+    return r.json().get("message", "API running.")
+
+
 def year_bounds(year: int, tz_offset: str = "+01:00"):
     start = dt.datetime.fromisoformat(f"{year}-01-01T00:00:00{tz_offset}")
     end = dt.datetime.fromisoformat(f"{year + 1}-01-01T00:00:00{tz_offset}")
@@ -225,9 +253,26 @@ def main():
     lang = cfg.get("language", "en")
     nfmt = cfg.get("number_format", "de" if lang == "de" else "en")
     start, end = year_bounds(year, cfg.get("tz_offset", "+01:00"))
+
+    # --- preflight: report what is configured before touching the network
+    n_stats = len(cfg.get("statistics", []))
+    n_counts = len(cfg.get("counts", []))
     print(f"HA Wrapped {year}: {iso(start)} .. {iso(end)}")
+    print("Preflight:")
+    print(f"  [ OK ] config: {args.config} "
+          f"({n_stats} statistics, {n_counts} counts)")
+    src = "env HA_TOKEN" if os.environ.get("HA_TOKEN") else "config 'token:'"
+    print(f"  [ OK ] HA token: set via {src}")
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        print("  [ OK ] ANTHROPIC_API_KEY: set, witty copy enabled")
+    else:
+        print("  [WARN] ANTHROPIC_API_KEY: not set, plain labels only")
+    if n_stats + n_counts == 0:
+        sys.exit("  [FAIL] no 'statistics:' or 'counts:' entries configured.")
+    print(f"  [ OK ] {ha_url}: {check_api(ha_url, token)}")
 
     stats_out = []
+    entity_status = []
 
     # --- numeric long-term statistics
     stat_cfgs = cfg.get("statistics", [])
@@ -240,7 +285,12 @@ def main():
             total, series = reduce_stat(rows, s.get("aggregate", "sum"))
             if total is None:
                 print(f"  ! no data for {s['entity_id']}")
+                entity_status.append({"id": s["entity_id"],
+                                      "kind": "statistics",
+                                      "status": "no data"})
                 continue
+            entity_status.append({"id": s["entity_id"], "kind": "statistics",
+                                  "status": f"ok ({len(rows)} months)"})
             scale = s.get("scale", 1.0)
             total *= scale
             series = [v * scale for v in series]
@@ -263,7 +313,12 @@ def main():
                                      c["to_state"], start, end)
         except Exception as e:  # noqa: BLE001
             print(f"  ! failed: {e}")
+            entity_status.append({"id": c["entity_id"], "kind": "counts",
+                                  "status": f"error: {e}"})
             continue
+        entity_status.append({"id": c["entity_id"], "kind": "counts",
+                              "status": f"ok ({n} events)" if n
+                              else "no events"})
         scale = c.get("scale", 1.0)
         value = n * scale
         stats_out.append({
@@ -292,35 +347,52 @@ def main():
 
     i18n = {
         "de": {"scroll": "scrollen", "trend": "Verlauf",
-               "jan": "Jan", "dec": "Dez",
+               "jan": "Jan", "dec": "Dez", "theme": "Hell / Dunkel",
                "intro_sub": "Was dein Zuhause dieses Jahr so getrieben hat.",
                "outro_title": "Bis naechstes Jahr."},
         "en": {"scroll": "scroll", "trend": "over the year",
-               "jan": "Jan", "dec": "Dec",
+               "jan": "Jan", "dec": "Dec", "theme": "light / dark",
                "intro_sub": "What your home has been up to this year.",
                "outro_title": "See you next year."},
     }.get(lang, None) or {
         "scroll": "scroll", "trend": "trend", "jan": "Jan", "dec": "Dec",
+        "theme": "light / dark",
         "intro_sub": "", "outro_title": f"Wrapped {year}"}
 
     payload = {
         "year": year,
         "lang": lang,
         "house": cfg.get("house_name", "My Home"),
+        "theme": cfg.get("theme", "auto"),
         "i18n": i18n,
         "intro_title": copy.get("intro_title", f"Wrapped {year}"),
         "intro_sub": copy.get("intro_sub", i18n["intro_sub"]),
         "outro_title": copy.get("outro_title", i18n["outro_title"]),
         "outro_sub": copy.get("outro_sub", ""),
         "stats": stats_out,
+        # self-debug info, shown in the page's status panel
+        "meta": {
+            "generated_at": dt.datetime.now().astimezone()
+                              .isoformat(timespec="seconds"),
+            "range": [iso(start), iso(end)],
+            "ai_copy": bool(copy),
+            "entities": entity_status,
+        },
     }
 
     # --- render
-    template = (Path(__file__).parent / "template.html").read_text()
-    html = template.replace("__WRAPPED_DATA__",
+    template = find_template().read_text()
+    token_str = '"__WRAPPED_DATA__"'
+    if token_str not in template:
+        token_str = "__WRAPPED_DATA__"
+    html = template.replace(token_str,
                             json.dumps(payload, ensure_ascii=False))
     out = Path(args.output or f"ha_wrapped_{year}.html")
     out.write_text(html)
+
+    ok = sum(1 for e in entity_status if e["status"].startswith("ok"))
+    print(f"Status: {ok}/{len(entity_status)} entities delivered data, "
+          f"AI copy: {'generated' if copy else 'fallback labels'}")
     print(f"Done -> {out.resolve()}")
 
 

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ha-wrapped"
+version = "1.0.0"
+description = "A Spotify-Wrapped-style year review for your Home Assistant"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["websockets", "pyyaml", "requests"]
+
+[project.urls]
+Homepage = "https://github.com/3DJupp/ha-wrapped"
+
+[project.scripts]
+ha-wrapped = "wrapped:main"
+
+[tool.setuptools]
+py-modules = ["wrapped"]
+
+# installs to <prefix>/share/ha-wrapped/, where wrapped.py looks for the
+# template when it is not sitting next to the script (uvx/pipx installs)
+[tool.setuptools.data-files]
+"share/ha-wrapped" = ["template.html", "config.example.yaml"]

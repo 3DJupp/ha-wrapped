@@ -2,3 +2,5 @@ config.yaml
 ha_wrapped_*.html
 __pycache__/
 .env
+build/
+*.egg-info/

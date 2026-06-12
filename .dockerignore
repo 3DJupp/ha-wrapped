@@ -1,0 +1,5 @@
+.git
+docs
+config.yaml
+*.html
+!template.html
