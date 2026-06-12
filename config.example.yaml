@@ -1,0 +1,64 @@
+# HA Wrapped configuration
+# Copy to config.yaml and adjust. Entities without data are skipped gracefully.
+
+ha_url: http://homeassistant.local:8123
+# token: ey...        # or export HA_TOKEN instead (recommended)
+
+# year: 2025          # defaults to the current year
+language: en          # language for the generated copy (en, de, ...)
+number_format: en     # en -> 1,234.5   de -> 1.234,5
+house_name: "My Home"
+# tone: "dry, witty, deadpan"   # personality of the AI-generated copy
+
+# ------------------------------------------------------------------
+# Long-term statistics (entities need a state_class).
+# aggregate: sum  -> yearly total of a cumulative sensor (energy, water, ...)
+#            mean -> yearly average (temperatures, humidity, ...)
+#            max  -> yearly peak (power spikes, ...)
+# scale lets you turn raw numbers into fun ones.
+statistics:
+  - entity_id: sensor.water_meter_total
+    label: "Water through the pipes"
+    aggregate: sum
+    unit: "liters"
+    scale: 1000          # m3 -> liters
+    decimals: 0
+
+  - entity_id: sensor.energy_total
+    label: "Electricity used"
+    aggregate: sum
+    unit: "kWh"
+    decimals: 0
+
+  - entity_id: sensor.living_room_temperature
+    label: "Average living room temperature"
+    aggregate: mean
+    unit: "°C"
+    decimals: 1
+
+# ------------------------------------------------------------------
+# State-change counts via the history API. Counts transitions INTO to_state.
+# scale turns counts into distances etc. (e.g. shutter travel per cycle).
+counts:
+  - entity_id: binary_sensor.washing_machine_running
+    to_state: "on"
+    label: "Laundry loads"
+    unit: "loads"
+
+  - entity_id: cover.living_room_shutter
+    to_state: "closing"
+    label: "Shutter travel distance"
+    unit: "meters"
+    scale: 2.4           # meters per cycle, tune to your windows
+    decimals: 0
+    footnote: "If this were an elevator, it would deserve a tip."
+
+  - entity_id: binary_sensor.coffee_machine_running
+    to_state: "on"
+    label: "Coffees brewed"
+    unit: "cups"
+
+  - entity_id: binary_sensor.doorbell
+    to_state: "on"
+    label: "Doorbell rings"
+    unit: "times"
