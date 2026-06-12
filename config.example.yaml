@@ -1,21 +1,40 @@
-# HA Wrapped configuration
-# Copy to config.yaml and adjust. Entities without data are skipped gracefully.
+# HA Wrapped configuration — complete reference.
+# Copy to config.yaml and adjust. Every option is shown here; optional ones
+# are commented out with their default. Entities without data are skipped
+# gracefully and reported in the status output / on-page status panel.
 
+# ------------------------------------------------------------------
+# Connection
 ha_url: http://homeassistant.local:8123
-# token: ey...        # or export HA_TOKEN instead (recommended)
+# token: ey...           # long-lived access token; prefer 'export HA_TOKEN'
+                         # instead so the secret never lives in this file
 
-# year: 2025          # defaults to the current year
-language: en          # language for the generated copy (en, de, ...)
-number_format: en     # en -> 1,234.5   de -> 1.234,5
-house_name: "My Home"
+# ------------------------------------------------------------------
+# General
+# year: 2025             # default: the current year
+# tz_offset: "+01:00"    # timezone offset used for the year boundaries
+language: en             # language of the generated copy (en, de, ...)
+number_format: en        # en -> 1,234.5   de -> 1.234,5
+house_name: "My Home"    # shown on the intro and outro card
+# theme: auto            # auto (follow system) | dark | light;
+                         # viewers can still toggle on the page itself
 # tone: "dry, witty, deadpan"   # personality of the AI-generated copy
+                                # (only used with ANTHROPIC_API_KEY set)
 
 # ------------------------------------------------------------------
 # Long-term statistics (entities need a state_class).
 # aggregate: sum  -> yearly total of a cumulative sensor (energy, water, ...)
 #            mean -> yearly average (temperatures, humidity, ...)
 #            max  -> yearly peak (power spikes, ...)
-# scale lets you turn raw numbers into fun ones.
+#
+# Per-entry options:
+#   entity_id   required   the HA entity
+#   label       required   fallback headline (and input for the AI copy)
+#   aggregate   sum        sum | mean | max
+#   unit        ""         shown under the number
+#   scale       1.0        multiply the raw value (m3 -> liters, ...)
+#   decimals    0          decimal places in the displayed number
+#   footnote    ""         optional fine print under the number
 statistics:
   - entity_id: sensor.water_meter_total
     label: "Water through the pipes"
@@ -35,10 +54,19 @@ statistics:
     aggregate: mean
     unit: "°C"
     decimals: 1
+    footnote: "Yearly mean over the long-term statistics."
 
 # ------------------------------------------------------------------
 # State-change counts via the history API. Counts transitions INTO to_state.
-# scale turns counts into distances etc. (e.g. shutter travel per cycle).
+#
+# Per-entry options:
+#   entity_id   required   the HA entity
+#   to_state    required   state whose arrivals are counted ("on", ...)
+#   label       required   fallback headline (and input for the AI copy)
+#   unit        "x"        shown under the number
+#   scale       1.0        turn counts into distances etc.
+#   decimals    0          decimal places in the displayed number
+#   footnote    ""         optional fine print under the number
 counts:
   - entity_id: binary_sensor.washing_machine_running
     to_state: "on"
@@ -62,3 +90,10 @@ counts:
     to_state: "on"
     label: "Doorbell rings"
     unit: "times"
+
+# ------------------------------------------------------------------
+# Not in this file (on purpose):
+#   HA_TOKEN            env var, the HA access token (recommended over token:)
+#   ANTHROPIC_API_KEY   env var, optional, enables the witty AI copy
+#   --config PATH       CLI flag, defaults to config.yaml
+#   --output PATH       CLI flag, defaults to ha_wrapped_<year>.html

@@ -8,27 +8,62 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Archivo:wdth,wght@62..125,700..900&display=swap" rel="stylesheet">
 <style>
   :root{
+    color-scheme:dark;
     --bg:#171210;          /* altbier dark */
     --bg2:#1f1814;
     --copper:#d98e32;      /* the one loud color */
-    --cream:#efe5d3;
+    --ink:#efe5d3;
     --dim:#8a7c66;
     --line:#3a2f26;
-    --red:#c8553d;
+    --bar:#43362a;
+    --glow:rgba(217,142,50,.06);
+    --ok:#7da06a;
+    --bad:#c8553d;
+  }
+  :root[data-theme="light"]{
+    color-scheme:light;
+    --bg:#f3ead9;
+    --bg2:#fbf5e8;
+    --copper:#b06f1a;
+    --ink:#241a10;
+    --dim:#8c7a5c;
+    --line:#d9c9aa;
+    --bar:#ddccab;
+    --glow:rgba(176,111,26,.08);
+    --ok:#4e7d3f;
+    --bad:#a93b26;
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      color-scheme:light;
+      --bg:#f3ead9;
+      --bg2:#fbf5e8;
+      --copper:#b06f1a;
+      --ink:#241a10;
+      --dim:#8c7a5c;
+      --line:#d9c9aa;
+      --bar:#ddccab;
+      --glow:rgba(176,111,26,.08);
+      --ok:#4e7d3f;
+      --bad:#a93b26;
+    }
   }
   *{box-sizing:border-box;margin:0}
   html{scroll-snap-type:y mandatory}
   body{
-    background:var(--bg);
-    color:var(--cream);
+    background:
+      radial-gradient(1100px 700px at 50% -10%, var(--glow), transparent 60%)
+      var(--bg);
+    color:var(--ink);
     font-family:"IBM Plex Mono",ui-monospace,monospace;
+    transition:background-color .3s ease, color .3s ease;
   }
   .card{
     min-height:100vh; min-height:100svh;
     scroll-snap-align:start;
     display:flex; flex-direction:column; justify-content:center;
     max-width:480px; margin:0 auto;
-    padding:48px 28px;
+    padding:48px 24px calc(48px + env(safe-area-inset-bottom));
     border-left:1px solid var(--line);
     border-right:1px solid var(--line);
     position:relative;
@@ -36,12 +71,14 @@
   .eyebrow{
     font-size:11px; letter-spacing:.22em; text-transform:uppercase;
     color:var(--dim); margin-bottom:18px;
+    overflow-wrap:anywhere;
   }
   .eyebrow b{color:var(--copper); font-weight:500}
   h1,h2{
     font-family:"Archivo",sans-serif;
     font-variation-settings:"wdth" 70;
     font-weight:900; line-height:.95; text-transform:uppercase;
+    overflow-wrap:break-word;
   }
   h1{font-size:clamp(44px,11vw,72px)}
   h2{font-size:clamp(28px,7vw,40px); margin-bottom:28px}
@@ -56,51 +93,149 @@
     border-radius:4px;
     min-width:.72em; padding:6px 4px 4px;
     font-size:clamp(40px,10vw,64px); font-weight:700;
-    text-align:center; color:var(--cream);
+    text-align:center; color:var(--ink);
     overflow:hidden; height:1.35em; position:relative;
   }
+  .odo .sep{font-size:clamp(40px,10vw,64px); font-weight:700; color:var(--dim); align-self:flex-end}
+  .odo.sm .d{font-size:clamp(28px,7.4vw,46px)}
+  .odo.sm .sep{font-size:clamp(28px,7.4vw,46px)}
   .odo .d .reel{display:block; transform:translateY(0); transition:transform 1.6s cubic-bezier(.16,1,.3,1)}
   .odo .d .reel span{display:block; height:1.35em; line-height:1.35em}
-  .odo .sep{font-size:clamp(40px,10vw,64px); font-weight:700; color:var(--dim); align-self:flex-end}
   .unit{color:var(--copper); font-size:15px; letter-spacing:.14em; text-transform:uppercase}
 
-  .quip{margin-top:26px; font-size:15px; line-height:1.65; color:var(--cream)}
+  .quip{margin-top:26px; font-size:15px; line-height:1.65; color:var(--ink)}
   .quip::before{content:"// "; color:var(--copper)}
   .footnote{margin-top:10px; font-size:12px; color:var(--dim); line-height:1.5}
 
   .spark{margin-top:34px}
-  .spark svg{width:100%; height:54px; display:block}
+  .spark svg{width:100%; height:60px; display:block}
   .spark .lbl{display:flex; justify-content:space-between; font-size:10px;
     letter-spacing:.18em; color:var(--dim); margin-top:6px; text-transform:uppercase}
 
-  .idx{position:absolute; top:24px; right:28px; font-size:11px; color:var(--dim)}
-  .hint{position:absolute; bottom:22px; left:28px; font-size:11px;
-    letter-spacing:.2em; color:var(--dim); text-transform:uppercase}
+  .idx{position:absolute; top:24px; right:24px; font-size:11px; color:var(--dim)}
+  .hint{position:absolute; bottom:calc(22px + env(safe-area-inset-bottom)); left:24px;
+    font-size:11px; letter-spacing:.2em; color:var(--dim); text-transform:uppercase}
   .outro .stamp{
     display:inline-block; margin-top:30px; padding:10px 14px;
     border:1px solid var(--copper); color:var(--copper);
     font-size:12px; letter-spacing:.2em; text-transform:uppercase;
     transform:rotate(-2deg);
   }
+
+  /* fixed chrome: theme toggle + section dots */
+  .theme{
+    position:fixed; top:14px; left:14px; z-index:10;
+    width:38px; height:38px; border-radius:50%;
+    border:1px solid var(--line); background:var(--bg2); color:var(--dim);
+    font-size:16px; line-height:1; cursor:pointer;
+  }
+  .theme:hover{color:var(--copper); border-color:var(--copper)}
+  .dots{
+    position:fixed; right:22px; top:50%; transform:translateY(-50%);
+    display:none; flex-direction:column; gap:12px; z-index:10;
+  }
+  .dots button{
+    width:9px; height:9px; border-radius:50%; padding:0; cursor:pointer;
+    border:1px solid var(--dim); background:transparent;
+  }
+  .dots button.on{background:var(--copper); border-color:var(--copper)}
+
+  /* self-debug status panel */
+  .dbg-btn{
+    position:fixed; bottom:calc(14px + env(safe-area-inset-bottom)); right:14px; z-index:10;
+    width:38px; height:38px; border-radius:50%;
+    border:1px solid var(--line); background:var(--bg2); color:var(--dim);
+    font-size:14px; line-height:1; cursor:pointer;
+  }
+  .dbg-btn:hover{color:var(--copper); border-color:var(--copper)}
+  .dbg{
+    position:fixed; right:14px; bottom:calc(60px + env(safe-area-inset-bottom));
+    z-index:11; width:min(440px, calc(100vw - 28px));
+    max-height:70vh; overflow:auto; display:none;
+    background:var(--bg2); border:1px solid var(--line); border-radius:8px;
+    padding:18px; font-size:12px; line-height:1.8; color:var(--ink);
+    box-shadow:0 12px 40px rgba(0,0,0,.35);
+  }
+  .dbg.open{display:block}
+  .dbg h3{font:inherit; font-weight:700; letter-spacing:.2em;
+    text-transform:uppercase; color:var(--copper); margin-bottom:8px}
+  .dbg .row{display:flex; gap:8px}
+  .dbg .row span:first-child{flex:none; font-weight:700}
+  .dbg .row code{overflow-wrap:anywhere; font:inherit}
+  .dbg .ok span:first-child{color:var(--ok)}
+  .dbg .warn span:first-child{color:var(--copper)}
+  .dbg .fail span:first-child{color:var(--bad)}
+
+  /* fade-up entrance, staggered per element */
+  .card > *{opacity:0; transform:translateY(16px);
+    transition:opacity .6s ease, transform .6s ease}
+  .card > *:nth-child(2){transition-delay:.07s}
+  .card > *:nth-child(3){transition-delay:.14s}
+  .card > *:nth-child(4){transition-delay:.21s}
+  .card > *:nth-child(5){transition-delay:.28s}
+  .card > *:nth-child(6){transition-delay:.35s}
+  .card > *:nth-child(7){transition-delay:.42s}
+  .card > *:nth-child(n+8){transition-delay:.49s}
+  .card.in > *{opacity:1; transform:none}
+
+  /* desktop: a wider, larger stage instead of a lost phone column */
+  @media (min-width:760px){
+    .card{max-width:640px; padding:72px 64px}
+    h1{font-size:88px}
+    h2{font-size:50px}
+    .odo .d{font-size:78px}
+    .odo .sep{font-size:78px}
+    .odo.sm .d{font-size:54px}
+    .odo.sm .sep{font-size:54px}
+    .sub,.quip{font-size:16px}
+    .spark svg{height:74px}
+    .idx{top:32px; right:64px}
+    .hint{left:64px}
+    .dots{display:flex}
+  }
+  @media (min-width:1200px){
+    .card{max-width:720px}
+  }
+
   @media (prefers-reduced-motion: reduce){
     .odo .d .reel{transition:none}
+    .card > *{opacity:1; transform:none; transition:none}
+    body{transition:none}
   }
 </style>
 </head>
 <body>
 <div id="app"></div>
 <script>
-const DATA = {"year": 2025, "lang": "en", "house": "Demo Home", "i18n": {"scroll": "scroll", "trend": "over the year", "jan": "Jan", "dec": "Dec"}, "intro_title": "Wrapped 2025", "intro_sub": "Your home kept count. Every single second. It is not sorry.", "outro_title": "See you next year.", "outro_sub": "The sensors never sleep. Apparently neither do you.", "stats": [{"id": "sensor.water_meter_total", "headline": "Water through the pipes", "display_value": "87,412", "unit": "liters", "quip": "That's roughly 350 bathtubs. Or one very wet year.", "footnote": "Measured per wM-Bus, second by second.", "series": [6200, 5900, 7100, 6800, 7400, 8100, 9200, 8800, 7600, 7000, 6500, 6812]}, {"id": "binary_sensor.washing_machine_running", "headline": "Laundry loads", "display_value": "312", "unit": "loads", "quip": "Statistically speaking, that's a laundromat with feelings.", "footnote": "", "series": [18, 17, 22, 25, 28, 30, 31, 29, 27, 28, 28, 29]}, {"id": "cover.living_room_shutter", "headline": "Shutter travel distance", "display_value": "4,218", "unit": "meters", "quip": "If this were an elevator, it would deserve a tip.", "footnote": "", "series": [280, 290, 310, 350, 400, 420, 460, 450, 380, 330, 290, 258]}, {"id": "binary_sensor.coffee_machine_running", "headline": "Coffees brewed", "display_value": "1,047", "unit": "cups", "quip": "2.9 per day. Suspiciously correlated with the laundry loads.", "footnote": "", "series": [80, 78, 85, 90, 92, 95, 98, 96, 90, 88, 85, 70]}]};
+let DATA = {"year": 2025, "lang": "en", "house": "Demo Home", "theme": "auto", "i18n": {"scroll": "scroll", "trend": "over the year", "jan": "Jan", "dec": "Dec", "theme": "light / dark"}, "intro_title": "Wrapped 2025", "intro_sub": "Your home kept count. Every single second. It is not sorry.", "outro_title": "See you next year.", "outro_sub": "The sensors never sleep. Apparently neither do you.", "stats": [{"id": "sensor.water_meter_total", "headline": "Water through the pipes", "display_value": "87,412", "unit": "liters", "quip": "That's roughly 350 bathtubs. Or one very wet year.", "footnote": "Measured per wM-Bus, second by second.", "series": [6200, 5900, 7100, 6800, 7400, 8100, 9200, 8800, 7600, 7000, 6500, 6812]}, {"id": "binary_sensor.washing_machine_running", "headline": "Laundry loads", "display_value": "312", "unit": "loads", "quip": "Statistically speaking, that's a laundromat with feelings.", "footnote": "", "series": [18, 17, 22, 25, 28, 30, 31, 29, 27, 28, 28, 29]}, {"id": "cover.living_room_shutter", "headline": "Shutter travel distance", "display_value": "4,218", "unit": "meters", "quip": "If this were an elevator, it would deserve a tip.", "footnote": "", "series": [280, 290, 310, 350, 400, 420, 460, 450, 380, 330, 290, 258]}, {"id": "binary_sensor.coffee_machine_running", "headline": "Coffees brewed", "display_value": "1,047", "unit": "cups", "quip": "2.9 per day. Suspiciously correlated with the laundry loads.", "footnote": "", "series": [80, 78, 85, 90, 92, 95, 98, 96, 90, 88, 85, 70]}], "meta": {"generated_at": "2025-12-31T18:00:00+01:00", "range": ["2025-01-01T00:00:00+0100", "2025-12-31T23:59:59+0100"], "ai_copy": true, "entities": [{"id": "sensor.water_meter_total", "kind": "statistics", "status": "ok (12 months)"}, {"id": "binary_sensor.washing_machine_running", "kind": "counts", "status": "ok (312 events)"}, {"id": "cover.living_room_shutter", "kind": "counts", "status": "ok (1757 events)"}, {"id": "binary_sensor.coffee_machine_running", "kind": "counts", "status": "ok (1047 events)"}]}};
+
+// self-debug: detect the raw, un-rendered template gracefully
+const rendered = typeof DATA === "object" && DATA && Array.isArray(DATA.stats);
+if(!rendered){
+  DATA = {year:new Date().getFullYear(), house:"HA Wrapped", stats:[],
+    intro_title:"Not rendered yet",
+    intro_sub:"This is the raw template. Run wrapped.py to fill it with " +
+      "your data: python3 wrapped.py --config config.yaml",
+    i18n:{}};
+}
 
 const I = DATA.i18n || {scroll:"scroll",trend:"trend",jan:"Jan",dec:"Dec"};
-document.getElementById("root").lang = DATA.lang || "en";
+const root = document.getElementById("root");
+root.lang = DATA.lang || "en";
 const app = document.getElementById("app");
 const esc = s => String(s ?? "").replace(/[&<>"]/g,
   c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+// theme: config default, overridden by the user's last toggle choice
+let saved = null;
+try{ saved = localStorage.getItem("haw-theme"); }catch(e){}
+const initial = saved || DATA.theme;
+if(initial === "light" || initial === "dark") root.dataset.theme = initial;
+
 function odometer(display){
-  // display is a pre-formatted German number string like "12.345,6"
-  return '<div class="odo">' + [...display].map(ch =>
+  // display is a pre-formatted number string like "12.345,6"
+  const sm = String(display).length > 7 ? " sm" : "";
+  return `<div class="odo${sm}">` + [...display].map(ch =>
     /[0-9]/.test(ch)
       ? `<span class="d"><span class="reel" data-digit="${ch}">` +
         Array.from({length:10},(_,i)=>`<span>${i}</span>`).join("") +
@@ -109,21 +244,61 @@ function odometer(display){
   ).join("") + "</div>";
 }
 
-function sparkline(series){
-  if(!series || series.filter(v=>v>0).length < 2) return "";
-  const max = Math.max(...series), n = series.length;
-  const pts = series.map((v,i)=>
-    `${(i/(n-1))*300},${52 - (max ? (v/max)*48 : 0)}`).join(" ");
+function chart(series){
+  if(!series || series.filter(v => v !== 0).length < 2) return "";
+  // honest zero baseline when the data has real spread; min baseline only
+  // for near-constant series (mean temperatures) so their shape stays visible
+  const min = Math.min(...series), max = Math.max(...series);
+  const base = (min >= 0 && max && (max - min) / max > 0.35) ? 0 : min;
+  const span = (max - base) || 1;
+  const W = 300, H = 60, n = series.length, slot = W / n;
+  const peak = series.indexOf(max);
+  const bars = series.map((v,i) => {
+    const bh = 6 + ((v - base) / span) * (H - 8);
+    return `<rect x="${(i*slot+2).toFixed(1)}" y="${(H-bh).toFixed(1)}"` +
+      ` width="${(slot-4).toFixed(1)}" height="${bh.toFixed(1)}" rx="2"` +
+      ` fill="${i === peak ? "var(--copper)" : "var(--bar)"}"/>`;
+  }).join("");
   return `<div class="spark">
-    <svg viewBox="0 0 300 54" preserveAspectRatio="none">
-      <polyline points="${pts}" fill="none" stroke="#d98e32"
-        stroke-width="2" stroke-linejoin="round"/>
-    </svg>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>
     <div class="lbl"><span>${esc(I.jan)}</span><span>${esc(I.trend)} ${DATA.year}</span><span>${esc(I.dec)}</span></div>
   </div>`;
 }
 
+// self-debug checks: generator metadata + payload sanity
+const checks = [];
+const check = (level, text) => checks.push({level, text});
+if(!rendered){
+  check("fail", "payload: placeholder still present — this template has " +
+    "not been rendered by wrapped.py yet");
+}else{
+  check(DATA.stats.length ? "ok" : "fail",
+    `payload: ${DATA.stats.length} stats, year ${DATA.year}`);
+  const m = DATA.meta || {};
+  if(m.generated_at) check("ok", `generated: ${m.generated_at}`);
+  if(m.range) check("ok", `range: ${m.range[0]} … ${m.range[1]}`);
+  if("ai_copy" in m) check(m.ai_copy ? "ok" : "warn",
+    m.ai_copy ? "AI copy: generated" : "AI copy: fallback labels");
+  (m.entities || []).forEach(e => check(
+    e.status.startsWith("ok") ? "ok" : "warn",
+    `${e.kind} ${e.id}: ${e.status}`));
+  DATA.stats.forEach(s => {
+    if(s.display_value === "?") check("warn", `${s.id}: no value`);
+    else if(!(s.series || []).some(v => v !== 0))
+      check("warn", `${s.id}: no monthly series, chart hidden`);
+  });
+}
+
 let html = `
+<button class="theme" id="theme" aria-label="${esc(I.theme || "light / dark")}">&#9680;</button>
+<button class="dbg-btn" id="dbg-btn" aria-label="status" aria-expanded="false">i</button>
+<aside class="dbg" id="dbg">
+  <h3>Status</h3>
+  ${checks.map(c => `<div class="row ${c.level}"><span>${
+    {ok:"&#10003;", warn:"!", fail:"&#10007;"}[c.level]
+  }</span><code>${esc(c.text)}</code></div>`).join("")}
+</aside>
+<nav class="dots" id="dots" aria-hidden="true"></nav>
 <section class="card">
   <div class="eyebrow"><b>${esc(DATA.house)}</b> · localhost</div>
   <h1>${esc(DATA.intro_title)}</h1>
@@ -141,11 +316,11 @@ DATA.stats.forEach((s, i) => {
   <div class="unit">${esc(s.unit)}</div>
   ${s.quip ? `<p class="quip">${esc(s.quip)}</p>` : ""}
   ${s.footnote ? `<p class="footnote">${esc(s.footnote)}</p>` : ""}
-  ${sparkline(s.series)}
+  ${chart(s.series)}
 </section>`;
 });
 
-html += `
+if(rendered) html += `
 <section class="card outro">
   <div class="eyebrow"><b>${esc(DATA.house)}</b> · ${esc(String(DATA.year))}</div>
   <h1>${esc(DATA.outro_title)}</h1>
@@ -155,11 +330,46 @@ html += `
 
 app.innerHTML = html;
 
-// roll the digit reels when a card scrolls into view
+const dbg = document.getElementById("dbg");
+const dbgBtn = document.getElementById("dbg-btn");
+dbgBtn.addEventListener("click", () => {
+  dbgBtn.setAttribute("aria-expanded", String(dbg.classList.toggle("open")));
+});
+// surface problems without being asked
+if(checks.some(c => c.level === "fail")) dbg.classList.add("open");
+
+document.getElementById("theme").addEventListener("click", () => {
+  const dark = root.dataset.theme === "dark" ||
+    (!root.dataset.theme && !matchMedia("(prefers-color-scheme: light)").matches);
+  const next = dark ? "light" : "dark";
+  root.dataset.theme = next;
+  try{ localStorage.setItem("haw-theme", next); }catch(e){}
+});
+
+const cards = [...document.querySelectorAll(".card")];
+
+// section dots (desktop only, via CSS)
+const dots = document.getElementById("dots");
+dots.innerHTML = cards.map((_,i) => `<button data-i="${i}" tabindex="-1"></button>`).join("");
+dots.addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if(b) cards[+b.dataset.i].scrollIntoView({behavior:"smooth"});
+});
+const watcher = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if(!e.isIntersecting) return;
+    const i = cards.indexOf(e.target);
+    dots.querySelectorAll("button").forEach((b,j) => b.classList.toggle("on", j === i));
+  });
+},{threshold:.55});
+cards.forEach(c => watcher.observe(c));
+
+// fade the card in and roll the digit reels when it scrolls into view
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const io = new IntersectionObserver(entries => {
   entries.forEach(e => {
     if(!e.isIntersecting) return;
+    e.target.classList.add("in");
     e.target.querySelectorAll(".reel").forEach((r, j) => {
       const d = +r.dataset.digit;
       const go = () => r.style.transform = `translateY(${-d * 1.35}em)`;
@@ -168,7 +378,7 @@ const io = new IntersectionObserver(entries => {
     io.unobserve(e.target);
   });
 },{threshold:.55});
-document.querySelectorAll(".card").forEach(c => io.observe(c));
+cards.forEach(c => io.observe(c));
 </script>
 </body>
 </html>
