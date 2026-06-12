@@ -21,6 +21,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 import websockets
@@ -92,7 +93,7 @@ async def fetch_statistics(ha_url, token, statistic_ids, start, end):
             "end_time": iso(end),
             "statistic_ids": statistic_ids,
             "period": "month",
-            "types": ["sum", "mean", "max", "min", "state"],
+            "types": ["sum", "mean", "max", "min", "state", "change"],
         }))
         while True:
             msg = json.loads(await ws.recv())
@@ -108,8 +109,12 @@ def reduce_stat(rows, aggregate):
         return None, []
 
     if aggregate == "sum":
-        # 'sum' is cumulative; the yearly total is last - first, the
-        # monthly series is the per-month delta.
+        # 'change' is the exact per-period delta; sum it for the total.
+        if any(r.get("change") is not None for r in rows):
+            series = [r.get("change") or 0.0 for r in rows]
+            return sum(series), series
+        # fallback for older HA without 'change': 'sum' is cumulative, the
+        # yearly total is last - first (misses the first month's delta).
         series, prev = [], None
         for r in rows:
             s = r.get("sum")
@@ -144,12 +149,15 @@ def reduce_stat(rows, aggregate):
 
 def fetch_count(ha_url, token, entity_id, to_state, start, end):
     """Count transitions into `to_state` using the REST history API."""
-    url = (
-        f"{ha_url.rstrip('/')}/api/history/period/{iso(start)}"
-        f"?filter_entity_id={entity_id}&end_time={iso(end)}"
-        f"&minimal_response&no_attributes"
-    )
+    # timestamps must be URL-encoded: a raw '+' in the query string is
+    # decoded as a space and HA answers 400 Bad Request
+    url = (f"{ha_url.rstrip('/')}/api/history/period/"
+           + quote(iso(start), safe=""))
     r = requests.get(url, headers={"Authorization": f"Bearer {token}"},
+                     params={"filter_entity_id": entity_id,
+                             "end_time": iso(end),
+                             "minimal_response": "",
+                             "no_attributes": ""},
                      timeout=300)
     r.raise_for_status()
     data = r.json()
