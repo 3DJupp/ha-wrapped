@@ -34,7 +34,7 @@ the LLM copy. No entity history is uploaded anywhere.
 ## Setup
 
 ```bash
-git clone <this repo> && cd ha-wrapped
+git clone https://github.com/3DJupp/ha-wrapped.git && cd ha-wrapped
 pip install -r requirements.txt
 cp config.example.yaml config.yaml
 # edit config.yaml: your HA URL and entities
