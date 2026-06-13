@@ -9,50 +9,60 @@
 <style>
   :root{
     color-scheme:dark;
-    --bg:#171210;          /* altbier dark */
-    --bg2:#1f1814;
-    --copper:#d98e32;      /* the one loud color */
-    --ink:#efe5d3;
-    --dim:#8a7c66;
-    --line:#3a2f26;
-    --bar:#43362a;
-    --glow:rgba(217,142,50,.06);
-    --ok:#7da06a;
-    --bad:#c8553d;
+    --bg:#0e0e12;
+    --bg2:#17171f;
+    --accent:#1db954;      /* default; rotated per card via .acc* */
+    --ink:#f3f1ee;
+    --dim:#8b8b97;
+    --line:#2a2a35;
+    --bar:#2f2f3b;
+    --ok:#3fcf6a;
+    --bad:#ff5a4d;
+    /* vibrant Wrapped accent rotation */
+    --acc0:#1db954; --acc1:#ff4f9a; --acc2:#4f7dff;
+    --acc3:#ffd23f; --acc4:#b15cff; --acc5:#ff7a45;
   }
   :root[data-theme="light"]{
     color-scheme:light;
-    --bg:#f3ead9;
-    --bg2:#fbf5e8;
-    --copper:#b06f1a;
-    --ink:#241a10;
-    --dim:#8c7a5c;
-    --line:#d9c9aa;
-    --bar:#ddccab;
-    --glow:rgba(176,111,26,.08);
-    --ok:#4e7d3f;
-    --bad:#a93b26;
+    --bg:#f4f3f7;
+    --bg2:#ffffff;
+    --accent:#138a3e;
+    --ink:#1a1a22;
+    --dim:#6b6b78;
+    --line:#e3e3ea;
+    --bar:#e7e7ef;
+    --ok:#138a3e;
+    --bad:#d6342a;
+    /* darker variants so the loud colors still read on a light ground */
+    --acc0:#138a3e; --acc1:#d81f6f; --acc2:#2d57d6;
+    --acc3:#b8860b; --acc4:#7c2fd6; --acc5:#d6521f;
   }
   @media (prefers-color-scheme: light){
     :root:not([data-theme="dark"]){
       color-scheme:light;
-      --bg:#f3ead9;
-      --bg2:#fbf5e8;
-      --copper:#b06f1a;
-      --ink:#241a10;
-      --dim:#8c7a5c;
-      --line:#d9c9aa;
-      --bar:#ddccab;
-      --glow:rgba(176,111,26,.08);
-      --ok:#4e7d3f;
-      --bad:#a93b26;
+      --bg:#f4f3f7;
+      --bg2:#ffffff;
+      --accent:#138a3e;
+      --ink:#1a1a22;
+      --dim:#6b6b78;
+      --line:#e3e3ea;
+      --bar:#e7e7ef;
+      --ok:#138a3e;
+      --bad:#d6342a;
+      --acc0:#138a3e; --acc1:#d81f6f; --acc2:#2d57d6;
+      --acc3:#b8860b; --acc4:#7c2fd6; --acc5:#d6521f;
     }
   }
+  /* per-card accent: set on each .card / .stile, cascades to children */
+  .acc0{--accent:var(--acc0)} .acc1{--accent:var(--acc1)}
+  .acc2{--accent:var(--acc2)} .acc3{--accent:var(--acc3)}
+  .acc4{--accent:var(--acc4)} .acc5{--accent:var(--acc5)}
   *{box-sizing:border-box;margin:0}
   html{scroll-snap-type:y mandatory}
   body{
     background:
-      radial-gradient(1100px 700px at 50% -10%, var(--glow), transparent 60%)
+      radial-gradient(1100px 700px at 50% -10%,
+        color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%)
       var(--bg);
     color:var(--ink);
     font-family:"IBM Plex Mono",ui-monospace,monospace;
@@ -67,13 +77,16 @@
     border-left:1px solid var(--line);
     border-right:1px solid var(--line);
     position:relative;
+    /* per-card accent wash — the Wrapped pop */
+    background:radial-gradient(820px 520px at 50% 6%,
+      color-mix(in srgb, var(--accent) 14%, transparent), transparent 62%);
   }
   .eyebrow{
     font-size:11px; letter-spacing:.22em; text-transform:uppercase;
     color:var(--dim); margin-bottom:18px;
     overflow-wrap:anywhere;
   }
-  .eyebrow b{color:var(--copper); font-weight:500}
+  .eyebrow b{color:var(--accent); font-weight:500}
   h1,h2{
     font-family:"Archivo",sans-serif;
     font-variation-settings:"wdth" 70;
@@ -89,7 +102,7 @@
   .odo .d{
     background:var(--bg2);
     border:1px solid var(--line);
-    border-bottom:3px solid var(--copper);
+    border-bottom:3px solid var(--accent);
     border-radius:4px;
     min-width:.72em; padding:6px 4px 4px;
     font-size:clamp(40px,10vw,64px); font-weight:700;
@@ -101,23 +114,28 @@
   .odo.sm .sep{font-size:clamp(28px,7.4vw,46px)}
   .odo .d .reel{display:block; transform:translateY(0); transition:transform 1.6s cubic-bezier(.16,1,.3,1)}
   .odo .d .reel span{display:block; height:1.35em; line-height:1.35em}
-  .unit{color:var(--copper); font-size:15px; letter-spacing:.14em; text-transform:uppercase}
+  .unit{color:var(--accent); font-size:15px; letter-spacing:.14em; text-transform:uppercase}
 
   .quip{margin-top:26px; font-size:15px; line-height:1.65; color:var(--ink)}
-  .quip::before{content:"// "; color:var(--copper)}
+  .quip::before{content:"// "; color:var(--accent)}
   .footnote{margin-top:10px; font-size:12px; color:var(--dim); line-height:1.5}
 
   .spark{margin-top:34px}
   .spark svg{width:100%; height:60px; display:block}
-  .spark .lbl{display:flex; justify-content:space-between; font-size:10px;
-    letter-spacing:.18em; color:var(--dim); margin-top:6px; text-transform:uppercase}
+  /* one small label per bar, evenly spaced to line up under the bars */
+  .spark .axis{display:flex; margin-top:6px}
+  .spark .axis span{flex:1 1 0; min-width:0; text-align:center; font-size:9px;
+    letter-spacing:.02em; color:var(--dim); text-transform:uppercase;
+    overflow:hidden; white-space:nowrap}
+  .spark .cap{text-align:center; font-size:10px; letter-spacing:.18em;
+    color:var(--dim); margin-top:5px; text-transform:uppercase}
 
   .idx{position:absolute; top:24px; right:24px; font-size:11px; color:var(--dim)}
   .hint{position:absolute; bottom:calc(22px + env(safe-area-inset-bottom)); left:24px;
     font-size:11px; letter-spacing:.2em; color:var(--dim); text-transform:uppercase}
   .outro .stamp{
     display:inline-block; margin-top:30px; padding:10px 14px;
-    border:1px solid var(--copper); color:var(--copper);
+    border:1px solid var(--accent); color:var(--accent);
     font-size:12px; letter-spacing:.2em; text-transform:uppercase;
     transform:rotate(-2deg);
   }
@@ -132,7 +150,7 @@
   .summary .stile{
     display:flex; flex-direction:column;
     background:var(--bg2); border:1px solid var(--line);
-    border-top:3px solid var(--copper);
+    border-top:3px solid var(--accent);
     border-radius:12px; padding:22px 20px 18px; overflow:hidden;
   }
   .summary .snum{
@@ -145,7 +163,7 @@
     font-family:"IBM Plex Mono",ui-monospace,monospace;
     font-variation-settings:normal;
     font-size:12px; letter-spacing:.14em; text-transform:uppercase;
-    color:var(--copper); font-weight:500;
+    color:var(--accent); font-weight:500;
   }
   .summary .slabel{
     margin-top:10px; font-size:13px; line-height:1.4; color:var(--dim);
@@ -166,7 +184,7 @@
     border:1px solid var(--line); background:var(--bg2); color:var(--dim);
     font-size:16px; line-height:1; cursor:pointer;
   }
-  .theme:hover{color:var(--copper); border-color:var(--copper)}
+  .theme:hover{color:var(--accent); border-color:var(--accent)}
   .dots{
     position:fixed; right:22px; top:50%; transform:translateY(-50%);
     display:none; flex-direction:column; gap:12px; z-index:10;
@@ -175,7 +193,7 @@
     width:9px; height:9px; border-radius:50%; padding:0; cursor:pointer;
     border:1px solid var(--dim); background:transparent;
   }
-  .dots button.on{background:var(--copper); border-color:var(--copper)}
+  .dots button.on{background:var(--accent); border-color:var(--accent)}
 
   /* self-debug status panel */
   .dbg-btn{
@@ -184,7 +202,7 @@
     border:1px solid var(--line); background:var(--bg2); color:var(--dim);
     font-size:14px; line-height:1; cursor:pointer;
   }
-  .dbg-btn:hover{color:var(--copper); border-color:var(--copper)}
+  .dbg-btn:hover{color:var(--accent); border-color:var(--accent)}
   .dbg{
     position:fixed; right:14px; bottom:calc(60px + env(safe-area-inset-bottom));
     z-index:11; width:min(440px, calc(100vw - 28px));
@@ -195,12 +213,12 @@
   }
   .dbg.open{display:block}
   .dbg h3{font:inherit; font-weight:700; letter-spacing:.2em;
-    text-transform:uppercase; color:var(--copper); margin-bottom:8px}
+    text-transform:uppercase; color:var(--accent); margin-bottom:8px}
   .dbg .row{display:flex; gap:8px}
   .dbg .row span:first-child{flex:none; font-weight:700}
   .dbg .row code{overflow-wrap:anywhere; font:inherit}
   .dbg .ok span:first-child{color:var(--ok)}
-  .dbg .warn span:first-child{color:var(--copper)}
+  .dbg .warn span:first-child{color:var(--accent)}
   .dbg .fail span:first-child{color:var(--bad)}
 
   /* fade-up entrance, staggered per element */
@@ -244,7 +262,7 @@
 <body>
 <div id="app"></div>
 <script>
-let DATA = {"year": 2025, "lang": "en", "house": "Demo Home", "theme": "auto", "i18n": {"scroll": "scroll", "trend": "trend", "jan": "Jan", "dec": "Dec", "theme": "light / dark", "months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]}, "intro_title": "Wrapped 2025", "intro_sub": "Your home kept count. Every single second. It is not sorry.", "outro_title": "See you next year.", "outro_sub": "The sensors never sleep. Apparently neither do you.", "stats": [{"id": "sensor.water_meter_total", "headline": "Water through the pipes", "display_value": "87,412", "unit": "liters", "quip": "That's roughly 350 bathtubs. Or one very wet year.", "footnote": "Measured per wM-Bus, second by second.", "series": [6200, 5900, 7100, 6800, 7400, 8100, 9200, 8800, 7600, 7000, 6500, 6812]}, {"id": "binary_sensor.washing_machine_running", "headline": "Laundry loads", "display_value": "312", "unit": "loads", "quip": "Statistically speaking, that's a laundromat with feelings.", "footnote": "", "series": [18, 17, 22, 25, 28, 30, 31, 29, 27, 28, 28, 29]}, {"id": "cover.living_room_shutter", "headline": "Shutter travel distance", "display_value": "4,218", "unit": "meters", "quip": "If this were an elevator, it would deserve a tip.", "footnote": "", "series": [280, 290, 310, 350, 400, 420, 460, 450, 380, 330, 290, 258]}, {"id": "binary_sensor.coffee_machine_running", "headline": "Coffees brewed", "display_value": "1,047", "unit": "cups", "quip": "2.9 per day. Suspiciously correlated with the laundry loads.", "footnote": "", "series": [80, 78, 85, 90, 92, 95, 98, 96, 90, 88, 85, 70]}], "meta": {"generated_at": "2025-12-31T18:00:00+01:00", "range": ["2025-01-01T00:00:00+0100", "2025-12-31T23:59:59+0100"], "ai_copy": true, "entities": [{"id": "sensor.water_meter_total", "kind": "statistics", "status": "ok (12 months)"}, {"id": "binary_sensor.washing_machine_running", "kind": "counts", "status": "ok (312 events)"}, {"id": "cover.living_room_shutter", "kind": "counts", "status": "ok (1757 events)"}, {"id": "binary_sensor.coffee_machine_running", "kind": "counts", "status": "ok (1047 events)"}]}, "period_label": "2025", "period": {"mode": "yearly", "labels": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]}};
+let DATA = {"year": 2025, "lang": "en", "house": "Demo Home", "theme": "auto", "i18n": {"scroll": "scroll", "trend": "trend", "jan": "Jan", "dec": "Dec", "theme": "light / dark", "months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], "generated_by": "Generated by Home Assistant"}, "intro_title": "Wrapped 2025", "intro_sub": "Your home kept count. Every single second. It is not sorry.", "outro_title": "See you next year.", "outro_sub": "The sensors never sleep. Apparently neither do you.", "stats": [{"id": "sensor.water_meter_total", "headline": "Water through the pipes", "display_value": "87,412", "unit": "liters", "quip": "That's roughly 350 bathtubs. Or one very wet year.", "footnote": "Measured per wM-Bus, second by second.", "series": [6200, 5900, 7100, 6800, 7400, 8100, 9200, 8800, 7600, 7000, 6500, 6812]}, {"id": "binary_sensor.washing_machine_running", "headline": "Laundry loads", "display_value": "312", "unit": "loads", "quip": "Statistically speaking, that's a laundromat with feelings.", "footnote": "", "series": [18, 17, 22, 25, 28, 30, 31, 29, 27, 28, 28, 29]}, {"id": "cover.living_room_shutter", "headline": "Shutter travel distance", "display_value": "4,218", "unit": "meters", "quip": "If this were an elevator, it would deserve a tip.", "footnote": "", "series": [280, 290, 310, 350, 400, 420, 460, 450, 380, 330, 290, 258]}, {"id": "binary_sensor.coffee_machine_running", "headline": "Coffees brewed", "display_value": "1,047", "unit": "cups", "quip": "2.9 per day. Suspiciously correlated with the laundry loads.", "footnote": "", "series": [80, 78, 85, 90, 92, 95, 98, 96, 90, 88, 85, 70]}], "meta": {"generated_at": "2025-12-31T18:00:00+01:00", "range": ["2025-01-01T00:00:00+0100", "2025-12-31T23:59:59+0100"], "ai_copy": true, "entities": [{"id": "sensor.water_meter_total", "kind": "statistics", "status": "ok (12 months)"}, {"id": "binary_sensor.washing_machine_running", "kind": "counts", "status": "ok (312 events)"}, {"id": "cover.living_room_shutter", "kind": "counts", "status": "ok (1757 events)"}, {"id": "binary_sensor.coffee_machine_running", "kind": "counts", "status": "ok (1047 events)"}]}, "period_label": "2025", "period": {"mode": "yearly", "labels": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]}};
 
 // self-debug: detect the raw, un-rendered template gracefully
 const rendered = typeof DATA === "object" && DATA && Array.isArray(DATA.stats);
@@ -294,18 +312,25 @@ function chart(series, mini){
     const bh = 6 + ((v - base) / span) * (H - 8);
     return `<rect x="${(i*slot+2).toFixed(1)}" y="${(H-bh).toFixed(1)}"` +
       ` width="${(slot-4).toFixed(1)}" height="${bh.toFixed(1)}" rx="2"` +
-      ` fill="${i === peak ? "var(--copper)" : "var(--bar)"}"/>`;
+      ` fill="${i === peak ? "var(--accent)" : "var(--bar)"}"/>`;
   }).join("");
-  // honest axis labels: first/last covered period (month or day of the
-  // month), so a partial year or a monthly wrapped reads right
+  // honest per-bar axis labels: month initials (yearly) or day numbers
+  // (monthly). On a long day-axis only every few labels are drawn so they
+  // don't collide; the first and last are always kept.
   const periodLabels = (DATA.period && DATA.period.labels) || I.months || [];
-  const first = periodLabels[0] || I.jan, last = periodLabels[n-1] || I.dec;
-  const lbl = mini ? "" : `<div class="lbl"><span>${esc(first)}</span>` +
-    `<span>${esc(I.trend)} · ${esc(DATA.period_label || String(DATA.year))}</span>` +
-    `<span>${esc(last)}</span></div>`;
+  const monthly = DATA.period && DATA.period.mode === "monthly";
+  const step = n > 14 ? Math.ceil(n / 8) : 1;
+  const axis = mini ? "" : `<div class="axis">` + series.map((_, i) => {
+    const show = i === 0 || i === n - 1 || i % step === 0;
+    if(!show) return "<span></span>";
+    const raw = periodLabels[i] != null ? String(periodLabels[i]) : "";
+    return `<span>${esc(monthly ? raw : raw.slice(0, 1))}</span>`;
+  }).join("") + `</div>`;
+  const cap = mini ? "" : `<div class="cap">${esc(I.trend)} · ` +
+    `${esc(DATA.period_label || String(DATA.year))}</div>`;
   return `<div class="spark${mini ? " mini" : ""}">
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>
-    ${lbl}
+    ${axis}${cap}
   </div>`;
 }
 
@@ -344,8 +369,8 @@ let html = `
   }</span><code>${esc(c.text)}</code></div>`).join("")}
 </aside>
 <nav class="dots" id="dots" aria-hidden="true"></nav>
-<section class="card">
-  <div class="eyebrow"><b>${esc(DATA.house)}</b> · localhost</div>
+<section class="card acc0">
+  <div class="eyebrow"><b>${esc(DATA.house)}</b> · ${esc(DATA.period_label || String(DATA.year))}</div>
   <h1>${esc(DATA.intro_title)}</h1>
   <p class="sub">${esc(DATA.intro_sub)}</p>
   <div class="hint">${esc(I.scroll)} &darr;</div>
@@ -353,7 +378,7 @@ let html = `
 
 DATA.stats.forEach((s, i) => {
   html += `
-<section class="card">
+<section class="card acc${(i+1)%6}">
   <div class="idx">${String(i+1).padStart(2,"0")}/${String(DATA.stats.length).padStart(2,"0")}</div>
   <div class="eyebrow">${esc(s.id)}</div>
   <h2>${esc(s.headline)}</h2>
@@ -366,26 +391,26 @@ DATA.stats.forEach((s, i) => {
 });
 
 if(rendered) html += `
-<section class="card summary">
+<section class="card summary acc1">
   <div class="eyebrow"><b>${esc(DATA.house)}</b> · ${esc(DATA.period_label || String(DATA.year))}</div>
   <h1>${esc(I.summary_title || "Recap")}</h1>
   <div class="sgrid">
-    ${DATA.stats.map(s => `
-    <div class="stile">
+    ${DATA.stats.map((s, i) => `
+    <div class="stile acc${i%6}">
       <div class="snum">${esc(s.display_value)}<span class="sunit">${esc(s.unit)}</span></div>
       <div class="slabel">${esc(s.headline)}</div>
       ${chart(s.series, true)}
     </div>`).join("")}
   </div>
-  <div class="foot">Generated by Home Assistant</div>
+  <div class="foot">${esc(I.generated_by || "Generated by Home Assistant")}</div>
 </section>`;
 
 if(rendered) html += `
-<section class="card outro">
+<section class="card outro acc2">
   <div class="eyebrow"><b>${esc(DATA.house)}</b> · ${esc(DATA.period_label || String(DATA.year))}</div>
   <h1>${esc(DATA.outro_title)}</h1>
   <p class="sub">${esc(DATA.outro_sub)}</p>
-  <span class="stamp">Generated by Home Assistant</span>
+  <span class="stamp">${esc(I.generated_by || "Generated by Home Assistant")}</span>
 </section>`;
 
 app.innerHTML = html;
