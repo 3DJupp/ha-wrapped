@@ -124,27 +124,36 @@
 
   /* recap card: compact grid of every stat, made for screenshots/export */
   .summary{justify-content:flex-start}
+  .summary h1{margin-bottom:2px}
   .summary .sgrid{
     flex:1; display:grid; grid-template-columns:repeat(2,1fr);
-    grid-auto-rows:1fr; gap:14px; margin:28px 0;
+    grid-auto-rows:1fr; gap:14px; margin:26px 0;
   }
   .summary .stile{
-    display:flex; flex-direction:column; justify-content:space-between;
-    border:1px solid var(--line); border-radius:10px; padding:20px 18px;
+    display:flex; flex-direction:column;
+    background:var(--bg2); border:1px solid var(--line);
+    border-top:3px solid var(--copper);
+    border-radius:12px; padding:22px 20px 18px; overflow:hidden;
   }
   .summary .snum{
     font-family:"Archivo",sans-serif; font-variation-settings:"wdth" 70;
-    font-weight:900; line-height:1.05; color:var(--ink);
-    font-size:clamp(28px,8vw,48px);
+    font-weight:900; line-height:1; color:var(--ink);
+    font-size:clamp(30px,7.4vw,52px);
+    display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
   }
   .summary .sunit{
-    display:block; margin-top:4px; font-size:11px; letter-spacing:.14em;
-    text-transform:uppercase; color:var(--copper); font-weight:500;
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-variation-settings:normal;
+    font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--copper); font-weight:500;
   }
   .summary .slabel{
-    font-size:13px; line-height:1.4; color:var(--dim);
+    margin-top:10px; font-size:13px; line-height:1.4; color:var(--dim);
     text-transform:uppercase; letter-spacing:.06em;
   }
+  /* the monthly chart grows to fill the tile: a real bar graph, not a strip */
+  .summary .spark.mini{flex:1; min-height:60px; margin:20px 0 0}
+  .summary .spark.mini svg{height:100%; min-height:60px}
   .summary .foot{
     text-align:center; font-size:11px; letter-spacing:.2em;
     text-transform:uppercase; color:var(--dim);
@@ -235,7 +244,7 @@
 <body>
 <div id="app"></div>
 <script>
-let DATA = {"year": 2025, "lang": "en", "house": "Demo Home", "theme": "auto", "i18n": {"scroll": "scroll", "trend": "over the year", "jan": "Jan", "dec": "Dec", "theme": "light / dark"}, "intro_title": "Wrapped 2025", "intro_sub": "Your home kept count. Every single second. It is not sorry.", "outro_title": "See you next year.", "outro_sub": "The sensors never sleep. Apparently neither do you.", "stats": [{"id": "sensor.water_meter_total", "headline": "Water through the pipes", "display_value": "87,412", "unit": "liters", "quip": "That's roughly 350 bathtubs. Or one very wet year.", "footnote": "Measured per wM-Bus, second by second.", "series": [6200, 5900, 7100, 6800, 7400, 8100, 9200, 8800, 7600, 7000, 6500, 6812]}, {"id": "binary_sensor.washing_machine_running", "headline": "Laundry loads", "display_value": "312", "unit": "loads", "quip": "Statistically speaking, that's a laundromat with feelings.", "footnote": "", "series": [18, 17, 22, 25, 28, 30, 31, 29, 27, 28, 28, 29]}, {"id": "cover.living_room_shutter", "headline": "Shutter travel distance", "display_value": "4,218", "unit": "meters", "quip": "If this were an elevator, it would deserve a tip.", "footnote": "", "series": [280, 290, 310, 350, 400, 420, 460, 450, 380, 330, 290, 258]}, {"id": "binary_sensor.coffee_machine_running", "headline": "Coffees brewed", "display_value": "1,047", "unit": "cups", "quip": "2.9 per day. Suspiciously correlated with the laundry loads.", "footnote": "", "series": [80, 78, 85, 90, 92, 95, 98, 96, 90, 88, 85, 70]}], "meta": {"generated_at": "2025-12-31T18:00:00+01:00", "range": ["2025-01-01T00:00:00+0100", "2025-12-31T23:59:59+0100"], "ai_copy": true, "entities": [{"id": "sensor.water_meter_total", "kind": "statistics", "status": "ok (12 months)"}, {"id": "binary_sensor.washing_machine_running", "kind": "counts", "status": "ok (312 events)"}, {"id": "cover.living_room_shutter", "kind": "counts", "status": "ok (1757 events)"}, {"id": "binary_sensor.coffee_machine_running", "kind": "counts", "status": "ok (1047 events)"}]}};
+let DATA = {"year": 2025, "lang": "en", "house": "Demo Home", "theme": "auto", "i18n": {"scroll": "scroll", "trend": "over the year", "jan": "Jan", "dec": "Dec", "theme": "light / dark", "months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]}, "intro_title": "Wrapped 2025", "intro_sub": "Your home kept count. Every single second. It is not sorry.", "outro_title": "See you next year.", "outro_sub": "The sensors never sleep. Apparently neither do you.", "stats": [{"id": "sensor.water_meter_total", "headline": "Water through the pipes", "display_value": "87,412", "unit": "liters", "quip": "That's roughly 350 bathtubs. Or one very wet year.", "footnote": "Measured per wM-Bus, second by second.", "series": [6200, 5900, 7100, 6800, 7400, 8100, 9200, 8800, 7600, 7000, 6500, 6812]}, {"id": "binary_sensor.washing_machine_running", "headline": "Laundry loads", "display_value": "312", "unit": "loads", "quip": "Statistically speaking, that's a laundromat with feelings.", "footnote": "", "series": [18, 17, 22, 25, 28, 30, 31, 29, 27, 28, 28, 29]}, {"id": "cover.living_room_shutter", "headline": "Shutter travel distance", "display_value": "4,218", "unit": "meters", "quip": "If this were an elevator, it would deserve a tip.", "footnote": "", "series": [280, 290, 310, 350, 400, 420, 460, 450, 380, 330, 290, 258]}, {"id": "binary_sensor.coffee_machine_running", "headline": "Coffees brewed", "display_value": "1,047", "unit": "cups", "quip": "2.9 per day. Suspiciously correlated with the laundry loads.", "footnote": "", "series": [80, 78, 85, 90, 92, 95, 98, 96, 90, 88, 85, 70]}], "meta": {"generated_at": "2025-12-31T18:00:00+01:00", "range": ["2025-01-01T00:00:00+0100", "2025-12-31T23:59:59+0100"], "ai_copy": true, "entities": [{"id": "sensor.water_meter_total", "kind": "statistics", "status": "ok (12 months)"}, {"id": "binary_sensor.washing_machine_running", "kind": "counts", "status": "ok (312 events)"}, {"id": "cover.living_room_shutter", "kind": "counts", "status": "ok (1757 events)"}, {"id": "binary_sensor.coffee_machine_running", "kind": "counts", "status": "ok (1047 events)"}]}, "period_label": "2025"};
 
 // self-debug: detect the raw, un-rendered template gracefully
 const rendered = typeof DATA === "object" && DATA && Array.isArray(DATA.stats);
@@ -272,7 +281,7 @@ function odometer(display){
   ).join("") + "</div>";
 }
 
-function chart(series){
+function chart(series, mini){
   if(!series || series.filter(v => v !== 0).length < 2) return "";
   // honest zero baseline when the data has real spread; min baseline only
   // for near-constant series (mean temperatures) so their shape stays visible
@@ -287,9 +296,15 @@ function chart(series){
       ` width="${(slot-4).toFixed(1)}" height="${bh.toFixed(1)}" rx="2"` +
       ` fill="${i === peak ? "var(--copper)" : "var(--bar)"}"/>`;
   }).join("");
-  return `<div class="spark">
+  // honest axis labels: first/last covered month, so a partial year reads right
+  const months = I.months || [];
+  const first = months[0] || I.jan, last = months[n-1] || I.dec;
+  const labels = mini ? "" : `<div class="lbl"><span>${esc(first)}</span>` +
+    `<span>${esc(I.trend)} ${esc(String(DATA.year))}</span>` +
+    `<span>${esc(last)}</span></div>`;
+  return `<div class="spark${mini ? " mini" : ""}">
     <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>
-    <div class="lbl"><span>${esc(I.jan)}</span><span>${esc(I.trend)} ${DATA.year}</span><span>${esc(I.dec)}</span></div>
+    ${labels}
   </div>`;
 }
 
@@ -350,13 +365,14 @@ DATA.stats.forEach((s, i) => {
 
 if(rendered) html += `
 <section class="card summary">
-  <div class="eyebrow"><b>${esc(DATA.house)}</b> · ${esc(String(DATA.year))}</div>
+  <div class="eyebrow"><b>${esc(DATA.house)}</b> · ${esc(DATA.period_label || String(DATA.year))}</div>
   <h1>${esc(I.summary_title || "Recap")}</h1>
   <div class="sgrid">
     ${DATA.stats.map(s => `
     <div class="stile">
       <div class="snum">${esc(s.display_value)}<span class="sunit">${esc(s.unit)}</span></div>
       <div class="slabel">${esc(s.headline)}</div>
+      ${chart(s.series, true)}
     </div>`).join("")}
   </div>
   <div class="foot">Generated by Home Assistant</div>

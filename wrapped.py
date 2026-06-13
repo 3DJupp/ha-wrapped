@@ -34,6 +34,15 @@ def iso(t: dt.datetime) -> str:
     return t.strftime("%Y-%m-%dT%H:%M:%S%z")
 
 
+# month abbreviations for the chart axis and the partial-year range label
+MONTHS = {
+    "de": ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun",
+           "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"],
+    "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+}
+
+
 def find_template() -> Path:
     """Locate template.html next to the script or in an installed prefix."""
     candidates = [
@@ -289,7 +298,14 @@ def main():
     year = cfg.get("year", dt.date.today().year)
     lang = cfg.get("language", "en")
     nfmt = cfg.get("number_format", "de" if lang == "de" else "en")
-    start, end = year_bounds(year, cfg.get("tz_offset", "+01:00"))
+    tz = cfg.get("tz_offset", "+01:00")
+    start, end = year_bounds(year, tz)
+
+    # a year still in progress only has data up to "now"; flag it so the page
+    # can say "Jan – Jun" instead of pretending the empty months are zeros
+    full_end = dt.datetime.fromisoformat(f"{year + 1}-01-01T00:00:00{tz}")
+    partial = end.astimezone(dt.timezone.utc) < full_end.astimezone(dt.timezone.utc)
+    months_covered = end.month if partial else 12
 
     # --- preflight: report what is configured before touching the network
     n_stats = len(cfg.get("statistics", []))
@@ -372,6 +388,13 @@ def main():
     if not stats_out:
         sys.exit("No stats collected, nothing to render.")
 
+    # --- partial year: drop the not-yet-happened trailing months so their
+    # zeros don't read as a real cliff in the charts
+    if partial:
+        for s in stats_out:
+            if s["series"]:
+                s["series"] = s["series"][:months_covered]
+
     # --- copywriting
     print("Generating copy ...")
     copy = claude_copy(stats_out, year, lang,
@@ -398,12 +421,19 @@ def main():
         "theme": "light / dark",
         "intro_sub": "", "outro_title": f"Wrapped {year}",
         "summary_title": "Recap"}
+    month_names = MONTHS.get(lang, MONTHS["en"])
+    i18n["months"] = month_names
+
+    # range label: bare year for a full year, "Jan – Jun 2025" while in progress
+    period_label = (f"{month_names[0]} – {month_names[months_covered - 1]} "
+                    f"{year}") if partial else str(year)
 
     payload = {
         "year": year,
         "lang": lang,
         "house": cfg.get("house_name", "My Home"),
         "theme": cfg.get("theme", "auto"),
+        "period_label": period_label,
         "i18n": i18n,
         "intro_title": copy.get("intro_title", f"Wrapped {year}"),
         "intro_sub": copy.get("intro_sub", i18n["intro_sub"]),
