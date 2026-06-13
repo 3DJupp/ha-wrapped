@@ -11,6 +11,9 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = ["websockets", "pyyaml", "requests"]
 
+[project.optional-dependencies]
+export = ["playwright"]
+
 [project.urls]
 Homepage = "https://github.com/3DJupp/ha-wrapped"
 

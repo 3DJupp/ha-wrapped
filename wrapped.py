@@ -16,6 +16,7 @@ Requires: pip install websockets pyyaml requests
 
 import argparse
 import asyncio
+import calendar
 import datetime as dt
 import json
 import os
@@ -32,6 +33,15 @@ import yaml
 
 def iso(t: dt.datetime) -> str:
     return t.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+# month abbreviations for the chart axis and the partial-year range label
+MONTHS = {
+    "de": ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun",
+           "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"],
+    "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+}
 
 
 def find_template() -> Path:
@@ -62,20 +72,53 @@ def check_api(ha_url: str, token: str) -> str:
     return r.json().get("message", "API running.")
 
 
-def year_bounds(year: int, tz_offset: str = "+01:00"):
-    start = dt.datetime.fromisoformat(f"{year}-01-01T00:00:00{tz_offset}")
-    end = dt.datetime.fromisoformat(f"{year + 1}-01-01T00:00:00{tz_offset}")
-    now = dt.datetime.now(dt.timezone.utc)
-    if end.astimezone(dt.timezone.utc) > now:
-        end = now
-    return start, end
+def _tzinfo(tz_offset: str) -> dt.tzinfo:
+    return dt.datetime.fromisoformat(f"2000-01-01T00:00:00{tz_offset}").tzinfo
+
+
+def compute_period(cfg: dict, tz_offset: str = "+01:00") -> dict:
+    """Work out the time window for the configured period.
+
+    ``period: yearly`` (default) wraps a full calendar year (``year:``,
+    default the current year). ``period: monthly`` wraps a single month
+    (``year:``/``month:``, default the month that just ended -- so a run
+    on the 1st of a month covers the previous one).
+    """
+    mode = cfg.get("period", "yearly")
+    now_utc = dt.datetime.now(dt.timezone.utc)
+
+    if mode == "monthly":
+        today = dt.datetime.now(_tzinfo(tz_offset))
+        last_month_end = today.replace(day=1) - dt.timedelta(days=1)
+        year = cfg.get("year", last_month_end.year)
+        month = cfg.get("month", last_month_end.month)
+        start = dt.datetime.fromisoformat(
+            f"{year}-{month:02d}-01T00:00:00{tz_offset}")
+        n_periods = calendar.monthrange(year, month)[1]
+        full_end = start + dt.timedelta(days=n_periods)
+    else:
+        year = cfg.get("year", dt.date.today().year)
+        month = None
+        start = dt.datetime.fromisoformat(f"{year}-01-01T00:00:00{tz_offset}")
+        full_end = dt.datetime.fromisoformat(f"{year + 1}-01-01T00:00:00{tz_offset}")
+        n_periods = 12
+
+    end = full_end
+    if end.astimezone(dt.timezone.utc) > now_utc:
+        end = now_utc
+
+    return {"mode": mode, "year": year, "month": month, "start": start,
+            "end": end, "full_end": full_end, "n_periods": n_periods}
 
 
 # ------------------------------------------------- long-term statistics
 
 
-async def fetch_statistics(ha_url, token, statistic_ids, start, end):
-    """recorder/statistics_during_period over the WebSocket API, monthly."""
+async def fetch_statistics(ha_url, token, statistic_ids, start, end, period="month"):
+    """recorder/statistics_during_period over the WebSocket API.
+
+    `period` is "month" for a yearly wrapped (12 rows) or "day" for a
+    monthly wrapped (one row per day of that month)."""
     ws_url = ha_url.replace("http://", "ws://").replace("https://", "wss://")
     ws_url = ws_url.rstrip("/") + "/api/websocket"
 
@@ -92,7 +135,7 @@ async def fetch_statistics(ha_url, token, statistic_ids, start, end):
             "start_time": iso(start),
             "end_time": iso(end),
             "statistic_ids": statistic_ids,
-            "period": "month",
+            "period": period,
             "types": ["sum", "mean", "max", "min", "state", "change"],
         }))
         while True:
@@ -141,47 +184,74 @@ def reduce_stat(rows, aggregate):
         series = [r.get("max") or 0.0 for r in rows]
         return (max(vals) if vals else None), series
 
+    if aggregate == "delta":
+        # for sensors that report an absolute/lifetime counter (e.g. a
+        # coffee machine's total brew count, state_class: total_increasing)
+        # rather than a recorder-tracked 'sum': the period total is the
+        # last reading minus the first, not the sum of the readings.
+        series, prev = [], None
+        for r in rows:
+            s = r.get("state")
+            if s is None:
+                series.append(0.0)
+                continue
+            series.append(0.0 if prev is None else max(0.0, s - prev))
+            prev = s
+        states = [r["state"] for r in rows if r.get("state") is not None]
+        total = (states[-1] - states[0]) if len(states) >= 2 else 0.0
+        return total, series
+
     raise ValueError(f"unknown aggregate: {aggregate}")
 
 
 # ------------------------------------------------- state-change counts
 
 
-def fetch_count(ha_url, token, entity_id, to_state, start, end):
-    """Count transitions into `to_state` using the REST history API."""
+def fetch_count(ha_url, token, entity_ids, to_state, start, end,
+                n_periods=12, period_unit="month"):
+    """Count transitions into `to_state` using the REST history API.
+
+    `entity_ids` may be a single entity id or a list -- counts and the
+    per-period series are summed across all of them (e.g. several covers
+    that should read as one "shutter travel" stat). `period_unit` is
+    "month" for a yearly wrapped or "day" for a monthly wrapped."""
+    if isinstance(entity_ids, str):
+        entity_ids = [entity_ids]
     # timestamps must be URL-encoded: a raw '+' in the query string is
     # decoded as a space and HA answers 400 Bad Request
     url = (f"{ha_url.rstrip('/')}/api/history/period/"
            + quote(iso(start), safe=""))
     r = requests.get(url, headers={"Authorization": f"Bearer {token}"},
-                     params={"filter_entity_id": entity_id,
+                     params={"filter_entity_id": ",".join(entity_ids),
                              "end_time": iso(end),
                              "minimal_response": "",
                              "no_attributes": ""},
                      timeout=300)
     r.raise_for_status()
     data = r.json()
-    if not data or not data[0]:
-        return 0, [0] * 12
 
     count = 0
-    monthly = [0] * 12
-    prev = None
-    for st in data[0]:
-        state = st.get("state")
-        when = st.get("last_changed") or st.get("last_updated")
-        if state == to_state and prev != to_state:
-            count += 1
-            if when:
-                monthly[dt.datetime.fromisoformat(when).month - 1] += 1
-        prev = state
-    return count, monthly
+    series = [0] * n_periods
+    for history in data:
+        prev = None
+        for st in history:
+            state = st.get("state")
+            when = st.get("last_changed") or st.get("last_updated")
+            if state == to_state and prev != to_state:
+                count += 1
+                if when:
+                    ts = dt.datetime.fromisoformat(when)
+                    idx = (ts.day if period_unit == "day" else ts.month) - 1
+                    if 0 <= idx < n_periods:
+                        series[idx] += 1
+            prev = state
+    return count, series
 
 
 # ------------------------------------------------------- Claude copy
 
 
-def claude_copy(stats, year, language="en", tone="dry, witty, deadpan"):
+def claude_copy(stats, period_label, language="en", tone="dry, witty, deadpan"):
     """Ask Claude for witty one-liners. Returns {} on any failure."""
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
@@ -194,11 +264,12 @@ def claude_copy(stats, year, language="en", tone="dry, witty, deadpan"):
         for s in stats
     ]
     prompt = (
-        f"You write the copy for a 'Home Assistant Wrapped {year}', a "
-        "Spotify-Wrapped-style year review for a smart home.\n"
+        f"You write the copy for a 'Home Assistant Wrapped' page covering "
+        f"'{period_label}', a Spotify-Wrapped-style review for a smart "
+        "home.\n"
         f"Language: {language}. Tone: {tone}. Short and punchy, "
         "no cringe, no emojis, no exclamation mark spam.\n\n"
-        f"Here are the yearly stats as JSON:\n"
+        f"Here are the stats for this period as JSON:\n"
         f"{json.dumps(facts, ensure_ascii=False)}\n\n"
         "Respond ONLY with a JSON object, no markdown fences:\n"
         "{\n"
@@ -233,6 +304,27 @@ def claude_copy(stats, year, language="en", tone="dry, witty, deadpan"):
         return {}
 
 
+# --------------------------------------------------------- social export
+
+
+def export_summary_png(html_path: Path, out_path: Path, width: int, height: int):
+    """Screenshot the .summary recap card as a ready-to-post PNG."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        sys.exit("--export-summary needs Playwright: "
+                 "pip install 'ha-wrapped[export]' && playwright install chromium")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": width, "height": height})
+        page.goto(f"file://{html_path.resolve()}")
+        page.locator(".summary").scroll_into_view_if_needed()
+        page.wait_for_timeout(2500)  # let the fade-up animation settle
+        page.screenshot(path=str(out_path))
+        browser.close()
+
+
 # ------------------------------------------------------------- main
 
 
@@ -249,6 +341,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.yaml")
     ap.add_argument("--output", default=None)
+    ap.add_argument("--export-summary", action="store_true",
+                     help="also export the recap card as a PNG, ready for "
+                          "social media (needs Playwright; "
+                          "pip install 'ha-wrapped[export]')")
+    ap.add_argument("--summary-size", default="1080x1080",
+                     help="WIDTHxHEIGHT for --export-summary "
+                          "(default 1080x1080; use 1080x1920 for a 9:16 "
+                          "story format)")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -257,15 +357,28 @@ def main():
     if not token:
         sys.exit("Set HA_TOKEN or put 'token:' in the config.")
 
-    year = cfg.get("year", dt.date.today().year)
     lang = cfg.get("language", "en")
     nfmt = cfg.get("number_format", "de" if lang == "de" else "en")
-    start, end = year_bounds(year, cfg.get("tz_offset", "+01:00"))
+    tz = cfg.get("tz_offset", "+01:00")
+
+    period = compute_period(cfg, tz)
+    mode, year, month = period["mode"], period["year"], period["month"]
+    start, end, full_end = period["start"], period["end"], period["full_end"]
+    n_periods = period["n_periods"]
+    stat_period = "day" if mode == "monthly" else "month"
+
+    # a period still in progress only has data up to "now"; flag it so the
+    # page can say "Jan – Jun" / "1.–13." instead of pretending the empty
+    # trailing periods are zeros
+    partial = end.astimezone(dt.timezone.utc) < full_end.astimezone(dt.timezone.utc)
+    periods_covered = ((end.day if mode == "monthly" else end.month)
+                       if partial else n_periods)
 
     # --- preflight: report what is configured before touching the network
     n_stats = len(cfg.get("statistics", []))
     n_counts = len(cfg.get("counts", []))
-    print(f"HA Wrapped {year}: {iso(start)} .. {iso(end)}")
+    period_id = f"{year}-{month:02d}" if mode == "monthly" else str(year)
+    print(f"HA Wrapped {period_id}: {iso(start)} .. {iso(end)}")
     print("Preflight:")
     print(f"  [ OK ] config: {args.config} "
           f"({n_stats} statistics, {n_counts} counts)")
@@ -287,7 +400,7 @@ def main():
     if stat_cfgs:
         ids = [s["entity_id"] for s in stat_cfgs]
         print(f"Fetching long-term statistics for {len(ids)} entities ...")
-        result = asyncio.run(fetch_statistics(ha_url, token, ids, start, end))
+        result = asyncio.run(fetch_statistics(ha_url, token, ids, start, end, stat_period))
         for s in stat_cfgs:
             rows = result.get(s["entity_id"], [])
             total, series = reduce_stat(rows, s.get("aggregate", "sum"))
@@ -297,8 +410,9 @@ def main():
                                       "kind": "statistics",
                                       "status": "no data"})
                 continue
+            unit_word = "days" if mode == "monthly" else "months"
             entity_status.append({"id": s["entity_id"], "kind": "statistics",
-                                  "status": f"ok ({len(rows)} months)"})
+                                  "status": f"ok ({len(rows)} {unit_word})"})
             scale = s.get("scale", 1.0)
             total *= scale
             series = [v * scale for v in series]
@@ -315,27 +429,31 @@ def main():
 
     # --- state-change counts
     for c in cfg.get("counts", []):
-        print(f"Counting {c['entity_id']} -> '{c['to_state']}' ...")
+        entity_ids = c["entity_id"]
+        ids_list = entity_ids if isinstance(entity_ids, list) else [entity_ids]
+        ids_label = ", ".join(ids_list)
+        print(f"Counting {ids_label} -> '{c['to_state']}' ...")
         try:
-            n, monthly = fetch_count(ha_url, token, c["entity_id"],
-                                     c["to_state"], start, end)
+            n, series = fetch_count(ha_url, token, ids_list, c["to_state"],
+                                    start, end, n_periods,
+                                    "day" if mode == "monthly" else "month")
         except Exception as e:  # noqa: BLE001
             print(f"  ! failed: {e}")
-            entity_status.append({"id": c["entity_id"], "kind": "counts",
+            entity_status.append({"id": ids_label, "kind": "counts",
                                   "status": f"error: {e}"})
             continue
-        entity_status.append({"id": c["entity_id"], "kind": "counts",
+        entity_status.append({"id": ids_label, "kind": "counts",
                               "status": f"ok ({n} events)" if n
                               else "no events"})
         scale = c.get("scale", 1.0)
         value = n * scale
         stats_out.append({
-            "id": c["entity_id"],
+            "id": ids_label,
             "label": c["label"],
             "unit": c.get("unit", "x"),
             "value": value,
             "display_value": fmt(value, c.get("decimals", 0), nfmt),
-            "series": [m * scale for m in monthly],
+            "series": [v * scale for v in series],
             "footnote": c.get("footnote", ""),
         })
         print(f"  {c['label']}: {n} events")
@@ -343,9 +461,31 @@ def main():
     if not stats_out:
         sys.exit("No stats collected, nothing to render.")
 
+    # --- partial period: drop the not-yet-happened trailing months/days so
+    # their zeros don't read as a real cliff in the charts
+    if partial:
+        for s in stats_out:
+            if s["series"]:
+                s["series"] = s["series"][:periods_covered]
+
+    # range label + chart axis labels: bare year / month name for a
+    # complete period, "Jan – Jun 2025" / "1.–13. May 2025" while in progress
+    month_names = MONTHS.get(lang, MONTHS["en"])
+    if mode == "monthly":
+        period_labels_full = [str(d) for d in range(1, n_periods + 1)]
+        if partial:
+            period_label = f"1.–{periods_covered}. {month_names[month - 1]} {year}"
+        else:
+            period_label = f"{month_names[month - 1]} {year}"
+    else:
+        period_labels_full = month_names
+        period_label = (f"{month_names[0]} – {month_names[periods_covered - 1]} "
+                        f"{year}") if partial else str(year)
+    period_labels = period_labels_full[:periods_covered]
+
     # --- copywriting
     print("Generating copy ...")
-    copy = claude_copy(stats_out, year, lang,
+    copy = claude_copy(stats_out, period_label, lang,
                        cfg.get("tone", "dry, witty, deadpan"))
     cards_copy = copy.get("cards", {})
     for s in stats_out:
@@ -357,23 +497,29 @@ def main():
         "de": {"scroll": "scrollen", "trend": "Verlauf",
                "jan": "Jan", "dec": "Dez", "theme": "Hell / Dunkel",
                "intro_sub": "Was dein Zuhause dieses Jahr so getrieben hat.",
-               "outro_title": "Bis naechstes Jahr."},
-        "en": {"scroll": "scroll", "trend": "over the year",
+               "outro_title": "Bis naechstes Jahr.",
+               "summary_title": "Die Bilanz"},
+        "en": {"scroll": "scroll", "trend": "trend",
                "jan": "Jan", "dec": "Dec", "theme": "light / dark",
                "intro_sub": "What your home has been up to this year.",
-               "outro_title": "See you next year."},
+               "outro_title": "See you next year.",
+               "summary_title": "The Recap"},
     }.get(lang, None) or {
         "scroll": "scroll", "trend": "trend", "jan": "Jan", "dec": "Dec",
         "theme": "light / dark",
-        "intro_sub": "", "outro_title": f"Wrapped {year}"}
+        "intro_sub": "", "outro_title": f"Wrapped {period_label}",
+        "summary_title": "Recap"}
+    i18n["months"] = month_names
 
     payload = {
         "year": year,
         "lang": lang,
         "house": cfg.get("house_name", "My Home"),
         "theme": cfg.get("theme", "auto"),
+        "period_label": period_label,
+        "period": {"mode": mode, "labels": period_labels},
         "i18n": i18n,
-        "intro_title": copy.get("intro_title", f"Wrapped {year}"),
+        "intro_title": copy.get("intro_title", f"Wrapped {period_label}"),
         "intro_sub": copy.get("intro_sub", i18n["intro_sub"]),
         "outro_title": copy.get("outro_title", i18n["outro_title"]),
         "outro_sub": copy.get("outro_sub", ""),
@@ -395,13 +541,26 @@ def main():
         token_str = "__WRAPPED_DATA__"
     html = template.replace(token_str,
                             json.dumps(payload, ensure_ascii=False))
-    out = Path(args.output or f"ha_wrapped_{year}.html")
+    default_name = (f"ha_wrapped_{year}-{month:02d}.html" if mode == "monthly"
+                    else f"ha_wrapped_{year}.html")
+    out = Path(args.output or default_name)
     out.write_text(html)
 
     ok = sum(1 for e in entity_status if e["status"].startswith("ok"))
     print(f"Status: {ok}/{len(entity_status)} entities delivered data, "
           f"AI copy: {'generated' if copy else 'fallback labels'}")
     print(f"Done -> {out.resolve()}")
+
+    if args.export_summary:
+        try:
+            w, h = (int(x) for x in args.summary_size.lower().split("x", 1))
+        except ValueError:
+            sys.exit(f"--summary-size must be WIDTHxHEIGHT, "
+                     f"got {args.summary_size!r}")
+        png_out = out.with_name(out.stem + "_summary.png")
+        print(f"Exporting recap card ({w}x{h}) ...")
+        export_summary_png(out, png_out, w, h)
+        print(f"Done -> {png_out.resolve()}")
 
 
 if __name__ == "__main__":

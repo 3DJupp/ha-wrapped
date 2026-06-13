@@ -11,8 +11,14 @@ ha_url: http://homeassistant.local:8123
 
 # ------------------------------------------------------------------
 # General
-# year: 2025             # default: the current year
-# tz_offset: "+01:00"    # timezone offset used for the year boundaries
+# period: yearly         # yearly (default) | monthly
+# year: 2025             # yearly: which year (default: the current year)
+#                         # monthly: which year the month below is in
+#                         # (default: the year of the month below)
+# month: 5                # monthly only: 1-12 (default: the month that
+#                         # just ended, so a run on the 1st covers the
+#                         # previous month -- handy for a monthly cronjob)
+# tz_offset: "+01:00"    # timezone offset used for the period boundaries
 language: en             # language of the generated copy (en, de, ...)
 number_format: en        # en -> 1,234.5   de -> 1.234,5
 house_name: "My Home"    # shown on the intro and outro card
@@ -23,14 +29,22 @@ house_name: "My Home"    # shown on the intro and outro card
 
 # ------------------------------------------------------------------
 # Long-term statistics (entities need a state_class).
-# aggregate: sum  -> yearly total of a cumulative sensor (energy, water, ...)
-#            mean -> yearly average (temperatures, humidity, ...)
-#            max  -> yearly peak (power spikes, ...)
+# aggregate: sum   -> period total of a cumulative sensor (energy, water, ...)
+#            mean  -> period average (temperatures, humidity, ...)
+#            max   -> period peak (power spikes, ...)
+#            delta -> period total of an absolute/lifetime counter, computed
+#                     as (last reading - first reading) instead of summed.
+#                     Use this for sensors that report a running total since
+#                     forever (state_class: total_increasing) rather than
+#                     one the recorder resets per period -- e.g. a coffee
+#                     machine's lifetime "brews" counter. With aggregate:
+#                     sum, such a sensor's absolute readings would get added
+#                     together into a meaningless six-digit number.
 #
 # Per-entry options:
 #   entity_id   required   the HA entity
 #   label       required   fallback headline (and input for the AI copy)
-#   aggregate   sum        sum | mean | max
+#   aggregate   sum        sum | mean | max | delta
 #   unit        ""         shown under the number
 #   scale       1.0        multiply the raw value (m3 -> liters, ...)
 #   decimals    0          decimal places in the displayed number
@@ -56,11 +70,19 @@ statistics:
     decimals: 1
     footnote: "Yearly mean over the long-term statistics."
 
+  - entity_id: sensor.coffee_machine_brew_count
+    label: "Coffees brewed"
+    aggregate: delta     # lifetime counter: total = last - first reading
+    unit: "cups"
+
 # ------------------------------------------------------------------
 # State-change counts via the history API. Counts transitions INTO to_state.
 #
 # Per-entry options:
-#   entity_id   required   the HA entity
+#   entity_id   required   the HA entity, or a list of entities (their
+#                           counts and monthly/daily series are summed --
+#                           e.g. several shutters reading as one "shutter
+#                           travel" stat)
 #   to_state    required   state whose arrivals are counted ("on", ...)
 #   label       required   fallback headline (and input for the AI copy)
 #   unit        "x"        shown under the number
@@ -73,7 +95,13 @@ counts:
     label: "Laundry loads"
     unit: "loads"
 
-  - entity_id: cover.living_room_shutter
+  # One shutter:
+  #   entity_id: cover.living_room_shutter
+  # Several shutters, all counted into one stat -- list them:
+  - entity_id:
+      - cover.living_room_shutter
+      - cover.bedroom_shutter
+      - cover.kitchen_shutter
     to_state: "closing"
     label: "Shutter travel distance"
     unit: "meters"
@@ -81,6 +109,9 @@ counts:
     decimals: 0
     footnote: "If this were an elevator, it would deserve a tip."
 
+  # Alternative to the sensor.coffee_machine_brew_count + aggregate: delta
+  # example above: if your coffee machine only exposes a power-derived
+  # binary_sensor (no lifetime counter), count its "on" cycles instead.
   - entity_id: binary_sensor.coffee_machine_running
     to_state: "on"
     label: "Coffees brewed"
@@ -97,3 +128,4 @@ counts:
 #   ANTHROPIC_API_KEY   env var, optional, enables the witty AI copy
 #   --config PATH       CLI flag, defaults to config.yaml
 #   --output PATH       CLI flag, defaults to ha_wrapped_<year>.html
+#                       (ha_wrapped_<year>-<month>.html for period: monthly)
