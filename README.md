@@ -74,6 +74,30 @@ the page was generated, the covered range, which entities delivered data
 and which were skipped, and it opens automatically if something is wrong
 (it even tells you when you opened the raw, un-rendered template).
 
+### Hosting & social export
+
+The output is a single static HTML file, so any static host works: copy
+it into Home Assistant's `www/` folder (served at `/local/...` with zero
+extra setup), drop it on GitHub Pages / Netlify / Cloudflare Pages, or
+`rsync`/`scp` it to a webserver you already run.
+
+The page also includes a **recap card** — a compact grid of every stat,
+made for sharing. Add `--export-summary` to also render it as a
+ready-to-post PNG (1080x1080 by default). This needs
+[Playwright](https://playwright.dev/), which is *not* part of the default
+install:
+
+```bash
+pip install playwright && playwright install chromium
+# or: pip install "ha-wrapped[export]" && playwright install chromium
+
+python3 wrapped.py --export-summary
+# -> ha_wrapped_2025.html
+# -> ha_wrapped_2025_summary.png   (1080x1080, ready for Instagram & co.)
+
+python3 wrapped.py --export-summary --summary-size 1080x1920   # 9:16 story format
+```
+
 ## Configuration
 
 Two kinds of stats, both optional, mix freely:

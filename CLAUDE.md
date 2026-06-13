@@ -45,6 +45,13 @@ renders a self-contained HTML story from `template.html`.
   labels. Model: `claude-sonnet-4-6`. `language` and `tone` come from
   config.
 - Auth via env: `HA_TOKEN` (required), `ANTHROPIC_API_KEY` (optional).
+- Recap card: the last `.summary` section in `template.html` renders a
+  compact grid of every stat (`display_value` + `unit` + `headline`),
+  built for screenshots/social sharing. `--export-summary` (in `main()`)
+  uses `export_summary_png()` to screenshot just that card via Playwright;
+  `--summary-size WIDTHxHEIGHT` controls the output (default `1080x1080`,
+  use `1080x1920` for a 9:16 story). Uses the same payload as the rest of
+  the page — no new fields.
 
 ## Conventions
 
@@ -54,6 +61,8 @@ renders a self-contained HTML story from `template.html`.
 - Number formatting is manual (`fmt()`), not locale-dependent, so output
   is reproducible on any system.
 - Keep `wrapped.py` stdlib + `websockets`/`pyyaml`/`requests` only.
+  Playwright is an optional extra (`pyproject.toml` `[export]`), lazily
+  imported only inside `export_summary_png()` for `--export-summary`.
 
 ## Verifying changes
 
@@ -69,5 +78,4 @@ renders a self-contained HTML story from `template.html`.
 ## Open ideas (not commitments)
 
 - Chunked monthly history queries for `counts` on large recorder DBs.
-- Optional PNG export of each card (Playwright) for direct sharing.
 - `min`/`count_distinct_days` aggregates; "busiest day" stat.

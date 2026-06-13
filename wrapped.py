@@ -233,6 +233,27 @@ def claude_copy(stats, year, language="en", tone="dry, witty, deadpan"):
         return {}
 
 
+# --------------------------------------------------------- social export
+
+
+def export_summary_png(html_path: Path, out_path: Path, width: int, height: int):
+    """Screenshot the .summary recap card as a ready-to-post PNG."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        sys.exit("--export-summary needs Playwright: "
+                 "pip install 'ha-wrapped[export]' && playwright install chromium")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": width, "height": height})
+        page.goto(f"file://{html_path.resolve()}")
+        page.locator(".summary").scroll_into_view_if_needed()
+        page.wait_for_timeout(2500)  # let the fade-up animation settle
+        page.screenshot(path=str(out_path))
+        browser.close()
+
+
 # ------------------------------------------------------------- main
 
 
@@ -249,6 +270,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.yaml")
     ap.add_argument("--output", default=None)
+    ap.add_argument("--export-summary", action="store_true",
+                     help="also export the recap card as a PNG, ready for "
+                          "social media (needs Playwright; "
+                          "pip install 'ha-wrapped[export]')")
+    ap.add_argument("--summary-size", default="1080x1080",
+                     help="WIDTHxHEIGHT for --export-summary "
+                          "(default 1080x1080; use 1080x1920 for a 9:16 "
+                          "story format)")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -357,15 +386,18 @@ def main():
         "de": {"scroll": "scrollen", "trend": "Verlauf",
                "jan": "Jan", "dec": "Dez", "theme": "Hell / Dunkel",
                "intro_sub": "Was dein Zuhause dieses Jahr so getrieben hat.",
-               "outro_title": "Bis naechstes Jahr."},
+               "outro_title": "Bis naechstes Jahr.",
+               "summary_title": "Die Bilanz"},
         "en": {"scroll": "scroll", "trend": "over the year",
                "jan": "Jan", "dec": "Dec", "theme": "light / dark",
                "intro_sub": "What your home has been up to this year.",
-               "outro_title": "See you next year."},
+               "outro_title": "See you next year.",
+               "summary_title": "The Recap"},
     }.get(lang, None) or {
         "scroll": "scroll", "trend": "trend", "jan": "Jan", "dec": "Dec",
         "theme": "light / dark",
-        "intro_sub": "", "outro_title": f"Wrapped {year}"}
+        "intro_sub": "", "outro_title": f"Wrapped {year}",
+        "summary_title": "Recap"}
 
     payload = {
         "year": year,
@@ -402,6 +434,17 @@ def main():
     print(f"Status: {ok}/{len(entity_status)} entities delivered data, "
           f"AI copy: {'generated' if copy else 'fallback labels'}")
     print(f"Done -> {out.resolve()}")
+
+    if args.export_summary:
+        try:
+            w, h = (int(x) for x in args.summary_size.lower().split("x", 1))
+        except ValueError:
+            sys.exit(f"--summary-size must be WIDTHxHEIGHT, "
+                     f"got {args.summary_size!r}")
+        png_out = out.with_name(out.stem + "_summary.png")
+        print(f"Exporting recap card ({w}x{h}) ...")
+        export_summary_png(out, png_out, w, h)
+        print(f"Done -> {png_out.resolve()}")
 
 
 if __name__ == "__main__":
