@@ -349,6 +349,10 @@ def main():
                      help="WIDTHxHEIGHT for --export-summary "
                           "(default 1080x1080; use 1080x1920 for a 9:16 "
                           "story format)")
+    ap.add_argument("--debug", action="store_true",
+                     help="dump the raw statistics rows (start/state/sum/"
+                          "change) and the computed series per entity, to "
+                          "sanity-check the numbers")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -404,6 +408,18 @@ def main():
         for s in stat_cfgs:
             rows = result.get(s["entity_id"], [])
             total, series = reduce_stat(rows, s.get("aggregate", "sum"))
+            if args.debug:
+                agg = s.get("aggregate", "sum")
+                print(f"  [debug] {s['entity_id']} (aggregate={agg}, "
+                      f"{len(rows)} rows):")
+                for r in rows:
+                    ts = r.get("start")
+                    if isinstance(ts, (int, float)):  # HA sends epoch ms
+                        ts = dt.datetime.fromtimestamp(
+                            ts / 1000, _tzinfo(tz)).date().isoformat()
+                    print(f"    start={ts} state={r.get('state')} "
+                          f"sum={r.get('sum')} change={r.get('change')}")
+                print(f"    -> raw total={total} series={series}")
             if total is None:
                 print(f"  ! no data for {s['entity_id']}")
                 entity_status.append({"id": s["entity_id"],
