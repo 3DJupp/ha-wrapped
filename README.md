@@ -10,7 +10,8 @@ monthly bar charts with a label under every bar, and a layout that works
 on phones and desktops alike. A built-in status panel (the ⓘ button) shows
 what was collected, what was skipped, and whether the AI copy was used.
 
-![HA Wrapped demo](docs/screenshot.png)
+<img width="740" height="1260" alt="demo" src="https://github.com/user-attachments/assets/2d62b6bd-3a10-4efa-8ab7-4fc70fd2c561" />
+
 
 **[Live demo](https://3djupp.github.io/ha-wrapped/)** — sample data, real scrolling odometers.
 
