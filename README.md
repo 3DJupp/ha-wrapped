@@ -3,10 +3,11 @@
 A Spotify-Wrapped-style year review for your Home Assistant. One Python
 script pulls a full year of statistics from your instance, optionally lets
 an LLM write deadpan one-liners about them, and renders a shareable,
-self-contained HTML story — copper look in dark *and* light (follows your
-system, toggleable on the page), mechanical odometer digits that roll in
-as you scroll, monthly bar charts per stat, and a layout that works on
-phones and desktops alike. A built-in status panel (the ⓘ button) shows
+self-contained HTML story — a vibrant, multi-color look (each stat card
+gets its own accent) in dark *and* light (follows your system, toggleable
+on the page), mechanical odometer digits that roll in as you scroll,
+monthly bar charts with a label under every bar, and a layout that works
+on phones and desktops alike. A built-in status panel (the ⓘ button) shows
 what was collected, what was skipped, and whether the AI copy was used.
 
 ![HA Wrapped demo](docs/screenshot.png)
