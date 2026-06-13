@@ -126,8 +126,10 @@ for the fully commented reference):
 |---|---|---|
 | `ha_url` | — | base URL of your Home Assistant instance |
 | `token` | — | HA access token; prefer the `HA_TOKEN` env var |
-| `year` | current year | the year to wrap |
-| `tz_offset` | `+01:00` | timezone offset for the year boundaries |
+| `period` | `yearly` | `yearly` or `monthly` — see [Monthly Wrapped](#monthly-wrapped) |
+| `year` | current year | the year to wrap (or the year of `month`, for `period: monthly`) |
+| `month` | previous month | `period: monthly` only, `1`-`12` |
+| `tz_offset` | `+01:00` | timezone offset for the period boundaries |
 | `language` | `en` | language for the generated copy (`en`, `de`, ...) |
 | `number_format` | follows language | `en` → 1,234.5 · `de` → 1.234,5 |
 | `house_name` | `My Home` | shown on the intro and outro card |
@@ -135,8 +137,39 @@ for the fully commented reference):
 | `tone` | `dry, witty, deadpan` | personality of the AI copy |
 
 Per-entry options for both lists: `label`, `unit`, `scale`, `decimals`,
-`footnote` — plus `aggregate` (`sum`/`mean`/`max`) for `statistics:` and
-`to_state` for `counts:`.
+`footnote` — plus `aggregate` (`sum`/`mean`/`max`/`delta`) for
+`statistics:` and `to_state` for `counts:`. In `counts:`, `entity_id` can
+also be a list — their counts and series are summed into one stat (e.g.
+several shutters as one "shutter travel" number).
+
+Use `aggregate: delta` for sensors that report an absolute, ever-increasing
+lifetime counter (`state_class: total_increasing`, e.g. a coffee machine's
+total brew count) — the period total becomes *last reading − first
+reading* instead of summing the absolute readings.
+
+## Monthly Wrapped
+
+By default HA Wrapped covers a full calendar year. Set `period: monthly` to
+get a per-month recap instead — same page, same stats, just a shorter
+window with a daily (instead of monthly) breakdown in the charts.
+
+```yaml
+period: monthly
+# year: 2025    # optional, defaults to the year of `month`
+# month: 5      # optional, defaults to the month that just ended
+```
+
+Without `year`/`month`, a run on (or shortly after) the 1st of a month
+wraps the month that just ended — perfect for a monthly cronjob:
+
+```bash
+# crontab: run at 00:05 on the 1st of every month
+5 0 1 * * cd /path/to/ha-wrapped && .venv/bin/python wrapped.py
+```
+
+The output filename also changes to `ha_wrapped_<year>-<month>.html`
+(e.g. `ha_wrapped_2025-05.html`), so monthly runs don't overwrite each
+other or the yearly file.
 
 ## Tips
 
@@ -147,6 +180,13 @@ Per-entry options for both lists: `label`, `unit`, `scale`, `decimals`,
   liters → bathtubs.
 - A full year of history for a `counts` entity can take a moment on
   large recorder databases. Long-term `statistics` queries are fast.
+- Multiple shutters/covers: either list all their entities under one
+  `counts:` entry (see `config.example.yaml`), or — if you'd rather do the
+  math in Home Assistant — add a [template
+  sensor](https://www.home-assistant.io/integrations/template/) with
+  `state_class: total_increasing` that adds `scale` to its own state on
+  every cover state change, then pull that single sensor in with
+  `aggregate: sum` (or `delta` if it never resets).
 
 ## Requirements
 

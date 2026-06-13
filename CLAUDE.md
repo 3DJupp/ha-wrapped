@@ -27,23 +27,39 @@ renders a self-contained HTML story from `template.html`.
 
 ## Architecture notes
 
+- `compute_period(cfg, tz)` resolves the time window: `period: yearly`
+  (default, `year:`) or `period: monthly` (`year:`/`month:`, defaults to
+  the month that just ended). Returns start/end/full_end, the mode, and
+  `n_periods` (12 for yearly, days-in-month for monthly) — this drives
+  both data paths below plus the partial-period trimming and the output
+  filename (`ha_wrapped_<year>.html` vs `ha_wrapped_<year>-<month>.html`).
 - Two data paths, both optional per config:
   - `statistics:` entries -> `recorder/statistics_during_period` over the
-    HA WebSocket API, monthly period. `reduce_stat()` collapses rows;
-    `sum` aggregates use cumulative-sum deltas.
+    HA WebSocket API, `"month"` period for yearly / `"day"` period for
+    monthly. `reduce_stat()` collapses rows; `sum` aggregates use
+    cumulative-sum deltas, `delta` uses `last_state - first_state` for
+    absolute/lifetime counters (e.g. a coffee machine's total brew count
+    — don't use `sum` for those, it adds the raw readings together).
   - `counts:` entries -> REST `/api/history/period` with
     `minimal_response&no_attributes`; counts transitions INTO `to_state`.
+    `entity_id` may be a list — counts and the per-period series are
+    summed across all of them (e.g. several shutters as one stat).
+    `fetch_count()` buckets by day-of-month (monthly) or month (yearly).
 - Payload contract for the template: see `payload = {...}` in `main()`.
-  Each stat: `id, label, unit, value, display_value, series[12],
+  Each stat: `id, label, unit, value, display_value, series[n_periods],
   headline, quip, footnote`. UI strings live in `payload.i18n`;
   `payload.theme` (`auto|dark|light`) sets the default theme;
-  `payload.meta` (generated_at, range, ai_copy, entities[]) feeds the
-  on-page status panel. The template must degrade gracefully when
-  `theme`/`meta` are missing.
+  `payload.period_label` is the human-readable range (`"2025"`,
+  `"Jan – Jun 2025"`, `"May 2025"`, `"1.–13. May 2025"`);
+  `payload.period` is `{mode: "yearly"|"monthly", labels: [...]}` with one
+  chart-axis label per series entry (month names or day numbers), used by
+  `chart()` in `template.html`; `payload.meta` (generated_at, range,
+  ai_copy, entities[]) feeds the on-page status panel. The template must
+  degrade gracefully when `theme`/`meta`/`period` are missing.
 - Claude copy: `claude_copy()` sends aggregated numbers only (never raw
   history) and expects strict JSON back; any failure falls back to plain
-  labels. Model: `claude-sonnet-4-6`. `language` and `tone` come from
-  config.
+  labels. Model: `claude-sonnet-4-6`. `language`, `tone` and
+  `period_label` come from config/`compute_period()`.
 - Auth via env: `HA_TOKEN` (required), `ANTHROPIC_API_KEY` (optional).
 - Recap card: the last `.summary` section in `template.html` renders a
   compact grid of every stat (`display_value` + `unit` + `headline`),
