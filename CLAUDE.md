@@ -3,13 +3,27 @@
 ## Project
 
 HA Wrapped: a Spotify-Wrapped-style year review for Home Assistant.
-A single Python script (`wrapped.py`) pulls a year of stats from an HA
-instance, optionally generates witty copy via the Anthropic API, and
-renders a self-contained HTML story from `template.html`.
+`wrapped.py` pulls a year of stats from an HA instance, optionally generates
+witty copy via the Anthropic API, and renders a self-contained HTML story
+from `template.html`. It ships two ways: a CLI/Docker one-liner, and a
+dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
 
 ## File map
 
-- `wrapped.py` — collector + renderer. No other Python files.
+- `wrapped.py` — collector + renderer engine. `collect_and_render(cfg, ...)`
+  is the shared core behind both entry points (CLI `main()` and the add-on
+  `server.py`); `resolve_connection(cfg)` returns `(ha_url, token, ws_url)`
+  — the Supervisor proxy when `SUPERVISOR_TOKEN` is set (add-on), else
+  `ha_url`+`HA_TOKEN` (CLI). `fetch_statistics`/`list_statistic_ids` take a
+  full `ws_url`.
+- `ha_wrapped/` — the Home Assistant add-on. `config.yaml` is the add-on
+  manifest (`ingress: true`, `homeassistant_api: true`, minimal options
+  schema), `server.py` is the aiohttp Ingress server (config UI with live
+  entity pickers, `/api/generate` runs the engine in a worker thread since
+  it spins up its own asyncio loop, `/view`+`/download` serve the result),
+  `Dockerfile`/`build.yaml`/`run.sh` build it (engine installed from git via
+  the `HA_WRAPPED_REF` build arg), `DOCS.md`/`CHANGELOG.md` are add-on docs.
+  `repository.yaml` (repo root) marks the repo as an add-on repository.
 - `template.html` — HTML/CSS/JS template. The quoted token
   `"__WRAPPED_DATA__"` is replaced with a JSON payload at render time
   (quoted so the raw template stays valid JS and can self-diagnose).

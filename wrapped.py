@@ -72,6 +72,29 @@ def check_api(ha_url: str, token: str) -> str:
     return r.json().get("message", "API running.")
 
 
+def resolve_connection(cfg: dict):
+    """Work out how to reach Home Assistant.
+
+    Returns ``(ha_url, token, ws_url)``. When running inside Home Assistant
+    as an add-on (``SUPERVISOR_TOKEN`` set), talk to Core through the
+    Supervisor proxy -- no long-lived token, no ``ha_url`` needed. Otherwise
+    fall back to ``ha_url`` + ``HA_TOKEN``/``token:`` as before.
+    """
+    sup = os.environ.get("SUPERVISOR_TOKEN")
+    if sup:
+        return ("http://supervisor/core", sup,
+                "ws://supervisor/core/websocket")
+    ha_url = cfg.get("ha_url")
+    if not ha_url:
+        sys.exit("Set 'ha_url' in the config (or run inside HA as an add-on).")
+    token = os.environ.get("HA_TOKEN") or cfg.get("token")
+    if not token:
+        sys.exit("Set HA_TOKEN or put 'token:' in the config.")
+    ws_url = (ha_url.replace("http://", "ws://").replace("https://", "wss://")
+              .rstrip("/") + "/api/websocket")
+    return (ha_url, token, ws_url)
+
+
 def _tzinfo(tz_offset: str) -> dt.tzinfo:
     return dt.datetime.fromisoformat(f"2000-01-01T00:00:00{tz_offset}").tzinfo
 
@@ -114,14 +137,13 @@ def compute_period(cfg: dict, tz_offset: str = "+01:00") -> dict:
 # ------------------------------------------------- long-term statistics
 
 
-async def fetch_statistics(ha_url, token, statistic_ids, start, end, period="month"):
+async def fetch_statistics(ws_url, token, statistic_ids, start, end, period="month"):
     """recorder/statistics_during_period over the WebSocket API.
 
     `period` is "month" for a yearly wrapped (12 rows) or "day" for a
-    monthly wrapped (one row per day of that month)."""
-    ws_url = ha_url.replace("http://", "ws://").replace("https://", "wss://")
-    ws_url = ws_url.rstrip("/") + "/api/websocket"
-
+    monthly wrapped (one row per day of that month). `ws_url` is the full
+    WebSocket endpoint (``.../api/websocket`` for a direct connection,
+    ``ws://supervisor/core/websocket`` via the add-on Supervisor proxy)."""
     async with websockets.connect(ws_url, max_size=16 * 1024 * 1024) as ws:
         await ws.recv()  # auth_required
         await ws.send(json.dumps({"type": "auth", "access_token": token}))
@@ -143,6 +165,28 @@ async def fetch_statistics(ha_url, token, statistic_ids, start, end, period="mon
             if msg.get("id") == 1 and msg.get("type") == "result":
                 if not msg.get("success"):
                     raise RuntimeError(f"statistics query failed: {msg}")
+                return msg["result"]
+
+
+async def list_statistic_ids(ws_url, token):
+    """recorder/list_statistic_ids over the WebSocket API.
+
+    Returns the entities that have long-term statistics, each with
+    ``statistic_id``, ``has_sum``/``has_mean`` and ``unit_of_measurement`` --
+    used by the add-on UI to offer a statistics-aware entity picker."""
+    async with websockets.connect(ws_url, max_size=16 * 1024 * 1024) as ws:
+        await ws.recv()  # auth_required
+        await ws.send(json.dumps({"type": "auth", "access_token": token}))
+        auth = json.loads(await ws.recv())
+        if auth.get("type") != "auth_ok":
+            raise RuntimeError(f"WebSocket auth failed: {auth}")
+        await ws.send(json.dumps({"id": 1,
+                                  "type": "recorder/list_statistic_ids"}))
+        while True:
+            msg = json.loads(await ws.recv())
+            if msg.get("id") == 1 and msg.get("type") == "result":
+                if not msg.get("success"):
+                    raise RuntimeError(f"list_statistic_ids failed: {msg}")
                 return msg["result"]
 
 
@@ -251,9 +295,13 @@ def fetch_count(ha_url, token, entity_ids, to_state, start, end,
 # ------------------------------------------------------- Claude copy
 
 
-def claude_copy(stats, period_label, language="en", tone="dry, witty, deadpan"):
-    """Ask Claude for witty one-liners. Returns {} on any failure."""
-    key = os.environ.get("ANTHROPIC_API_KEY")
+def claude_copy(stats, period_label, language="en", tone="dry, witty, deadpan",
+                api_key=None):
+    """Ask Claude for witty one-liners. Returns {} on any failure.
+
+    `api_key` lets the add-on pass the key from its config; falls back to
+    the ``ANTHROPIC_API_KEY`` env var for the CLI path."""
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         print("  (no ANTHROPIC_API_KEY set, skipping witty copy)")
         return {}
@@ -337,33 +385,21 @@ def fmt(value, decimals, number_format="en"):
     return s
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="config.yaml")
-    ap.add_argument("--output", default=None)
-    ap.add_argument("--export-summary", action="store_true",
-                     help="also export the recap card as a PNG, ready for "
-                          "social media (needs Playwright; "
-                          "pip install 'ha-wrapped[export]')")
-    ap.add_argument("--summary-size", default="1080x1080",
-                     help="WIDTHxHEIGHT for --export-summary "
-                          "(default 1080x1080; use 1080x1920 for a 9:16 "
-                          "story format)")
-    ap.add_argument("--debug", action="store_true",
-                     help="dump the raw statistics rows (start/state/sum/"
-                          "change) and the computed series per entity, to "
-                          "sanity-check the numbers")
-    args = ap.parse_args()
+def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
+                       debug=False, export_summary=False,
+                       summary_size="1080x1080", log=print):
+    """Collect the configured stats and render the wrapped HTML.
 
-    cfg = yaml.safe_load(Path(args.config).read_text())
-    ha_url = cfg["ha_url"]
-    token = os.environ.get("HA_TOKEN") or cfg.get("token")
-    if not token:
-        sys.exit("Set HA_TOKEN or put 'token:' in the config.")
-
+    The shared engine behind both entry points: the CLI (`main`) and the
+    add-on web UI (`server.py`). Connection details come from
+    `resolve_connection()`. `log` is a callable for progress lines (the
+    add-on captures these for its UI). Returns a result dict with the output
+    path, per-entity status, and whether the AI copy was used.
+    """
     lang = cfg.get("language", "en")
     nfmt = cfg.get("number_format", "de" if lang == "de" else "en")
     tz = cfg.get("tz_offset", "+01:00")
+    api_key = cfg.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")
 
     period = compute_period(cfg, tz)
     mode, year, month = period["mode"], period["year"], period["month"]
@@ -382,19 +418,15 @@ def main():
     n_stats = len(cfg.get("statistics", []))
     n_counts = len(cfg.get("counts", []))
     period_id = f"{year}-{month:02d}" if mode == "monthly" else str(year)
-    print(f"HA Wrapped {period_id}: {iso(start)} .. {iso(end)}")
-    print("Preflight:")
-    print(f"  [ OK ] config: {args.config} "
-          f"({n_stats} statistics, {n_counts} counts)")
-    src = "env HA_TOKEN" if os.environ.get("HA_TOKEN") else "config 'token:'"
-    print(f"  [ OK ] HA token: set via {src}")
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        print("  [ OK ] ANTHROPIC_API_KEY: set, witty copy enabled")
+    log(f"HA Wrapped {period_id}: {iso(start)} .. {iso(end)}")
+    log(f"  [ OK ] config: {n_stats} statistics, {n_counts} counts")
+    if api_key:
+        log("  [ OK ] Anthropic API key: set, witty copy enabled")
     else:
-        print("  [WARN] ANTHROPIC_API_KEY: not set, plain labels only")
+        log("  [WARN] Anthropic API key: not set, plain labels only")
     if n_stats + n_counts == 0:
-        sys.exit("  [FAIL] no 'statistics:' or 'counts:' entries configured.")
-    print(f"  [ OK ] {ha_url}: {check_api(ha_url, token)}")
+        raise ValueError("no 'statistics:' or 'counts:' entries configured.")
+    log(f"  [ OK ] {ha_url}: {check_api(ha_url, token)}")
 
     stats_out = []
     entity_status = []
@@ -403,25 +435,25 @@ def main():
     stat_cfgs = cfg.get("statistics", [])
     if stat_cfgs:
         ids = [s["entity_id"] for s in stat_cfgs]
-        print(f"Fetching long-term statistics for {len(ids)} entities ...")
-        result = asyncio.run(fetch_statistics(ha_url, token, ids, start, end, stat_period))
+        log(f"Fetching long-term statistics for {len(ids)} entities ...")
+        result = asyncio.run(fetch_statistics(ws_url, token, ids, start, end, stat_period))
         for s in stat_cfgs:
             rows = result.get(s["entity_id"], [])
             total, series = reduce_stat(rows, s.get("aggregate", "sum"))
-            if args.debug:
+            if debug:
                 agg = s.get("aggregate", "sum")
-                print(f"  [debug] {s['entity_id']} (aggregate={agg}, "
-                      f"{len(rows)} rows):")
+                log(f"  [debug] {s['entity_id']} (aggregate={agg}, "
+                    f"{len(rows)} rows):")
                 for r in rows:
                     ts = r.get("start")
                     if isinstance(ts, (int, float)):  # HA sends epoch ms
                         ts = dt.datetime.fromtimestamp(
                             ts / 1000, _tzinfo(tz)).date().isoformat()
-                    print(f"    start={ts} state={r.get('state')} "
-                          f"sum={r.get('sum')} change={r.get('change')}")
-                print(f"    -> raw total={total} series={series}")
+                    log(f"    start={ts} state={r.get('state')} "
+                        f"sum={r.get('sum')} change={r.get('change')}")
+                log(f"    -> raw total={total} series={series}")
             if total is None:
-                print(f"  ! no data for {s['entity_id']}")
+                log(f"  ! no data for {s['entity_id']}")
                 entity_status.append({"id": s["entity_id"],
                                       "kind": "statistics",
                                       "status": "no data"})
@@ -441,20 +473,20 @@ def main():
                 "series": series,
                 "footnote": s.get("footnote", ""),
             })
-            print(f"  {s['label']}: {total:.1f} {s.get('unit','')}")
+            log(f"  {s['label']}: {total:.1f} {s.get('unit','')}")
 
     # --- state-change counts
     for c in cfg.get("counts", []):
         entity_ids = c["entity_id"]
         ids_list = entity_ids if isinstance(entity_ids, list) else [entity_ids]
         ids_label = ", ".join(ids_list)
-        print(f"Counting {ids_label} -> '{c['to_state']}' ...")
+        log(f"Counting {ids_label} -> '{c['to_state']}' ...")
         try:
             n, series = fetch_count(ha_url, token, ids_list, c["to_state"],
                                     start, end, n_periods,
                                     "day" if mode == "monthly" else "month")
         except Exception as e:  # noqa: BLE001
-            print(f"  ! failed: {e}")
+            log(f"  ! failed: {e}")
             entity_status.append({"id": ids_label, "kind": "counts",
                                   "status": f"error: {e}"})
             continue
@@ -472,10 +504,10 @@ def main():
             "series": [v * scale for v in series],
             "footnote": c.get("footnote", ""),
         })
-        print(f"  {c['label']}: {n} events")
+        log(f"  {c['label']}: {n} events")
 
     if not stats_out:
-        sys.exit("No stats collected, nothing to render.")
+        raise ValueError("No stats collected, nothing to render.")
 
     # --- partial period: drop the not-yet-happened trailing months/days so
     # their zeros don't read as a real cliff in the charts
@@ -500,9 +532,9 @@ def main():
     period_labels = period_labels_full[:periods_covered]
 
     # --- copywriting
-    print("Generating copy ...")
+    log("Generating copy ...")
     copy = claude_copy(stats_out, period_label, lang,
-                       cfg.get("tone", "dry, witty, deadpan"))
+                       cfg.get("tone", "dry, witty, deadpan"), api_key=api_key)
     cards_copy = copy.get("cards", {})
     for s in stats_out:
         cc = cards_copy.get(s["id"], {})
@@ -562,24 +594,69 @@ def main():
                             json.dumps(payload, ensure_ascii=False))
     default_name = (f"ha_wrapped_{year}-{month:02d}.html" if mode == "monthly"
                     else f"ha_wrapped_{year}.html")
-    out = Path(args.output or default_name)
+    out = Path(output or default_name)
     out.write_text(html)
 
     ok = sum(1 for e in entity_status if e["status"].startswith("ok"))
-    print(f"Status: {ok}/{len(entity_status)} entities delivered data, "
-          f"AI copy: {'generated' if copy else 'fallback labels'}")
-    print(f"Done -> {out.resolve()}")
+    log(f"Status: {ok}/{len(entity_status)} entities delivered data, "
+        f"AI copy: {'generated' if copy else 'fallback labels'}")
+    log(f"Done -> {out.resolve()}")
 
-    if args.export_summary:
+    png_out = None
+    if export_summary:
         try:
-            w, h = (int(x) for x in args.summary_size.lower().split("x", 1))
+            w, h = (int(x) for x in summary_size.lower().split("x", 1))
         except ValueError:
-            sys.exit(f"--summary-size must be WIDTHxHEIGHT, "
-                     f"got {args.summary_size!r}")
+            raise ValueError(f"summary size must be WIDTHxHEIGHT, "
+                             f"got {summary_size!r}")
         png_out = out.with_name(out.stem + "_summary.png")
-        print(f"Exporting recap card ({w}x{h}) ...")
+        log(f"Exporting recap card ({w}x{h}) ...")
         export_summary_png(out, png_out, w, h)
-        print(f"Done -> {png_out.resolve()}")
+        log(f"Done -> {png_out.resolve()}")
+
+    return {
+        "output": str(out.resolve()),
+        "summary_png": str(png_out.resolve()) if png_out else None,
+        "entities": entity_status,
+        "ai_copy": bool(copy),
+        "period_label": period_label,
+        "ok": ok,
+    }
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default="config.yaml")
+    ap.add_argument("--output", default=None)
+    ap.add_argument("--export-summary", action="store_true",
+                     help="also export the recap card as a PNG, ready for "
+                          "social media (needs Playwright; "
+                          "pip install 'ha-wrapped[export]')")
+    ap.add_argument("--summary-size", default="1080x1080",
+                     help="WIDTHxHEIGHT for --export-summary "
+                          "(default 1080x1080; use 1080x1920 for a 9:16 "
+                          "story format)")
+    ap.add_argument("--debug", action="store_true",
+                     help="dump the raw statistics rows (start/state/sum/"
+                          "change) and the computed series per entity, to "
+                          "sanity-check the numbers")
+    args = ap.parse_args()
+
+    cfg = yaml.safe_load(Path(args.config).read_text())
+    ha_url, token, ws_url = resolve_connection(cfg)
+    src = ("Supervisor proxy" if os.environ.get("SUPERVISOR_TOKEN")
+           else "env HA_TOKEN" if os.environ.get("HA_TOKEN")
+           else "config 'token:'")
+    print("Preflight:")
+    print(f"  [ OK ] config: {args.config}")
+    print(f"  [ OK ] HA token: via {src}")
+    try:
+        collect_and_render(cfg, ha_url=ha_url, token=token, ws_url=ws_url,
+                           output=args.output, debug=args.debug,
+                           export_summary=args.export_summary,
+                           summary_size=args.summary_size)
+    except ValueError as e:
+        sys.exit(f"  [FAIL] {e}")
 
 
 if __name__ == "__main__":

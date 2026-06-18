@@ -18,6 +18,24 @@ what was collected, what was skipped, and whether the AI copy was used.
 > *"Your shutters traveled 4.2 km this year. If this were an elevator,
 > it would deserve a tip."*
 
+## Install as a Home Assistant add-on (recommended)
+
+Home Assistant is already running, so the cleanest way to use HA Wrapped is
+the dedicated add-on — **no long-lived token, config in the UI, and the page
+served right in the sidebar**:
+
+1. Settings → Add-ons → Add-on store → ⋮ → **Repositories**, add
+   `https://github.com/3DJupp/ha-wrapped`.
+2. Install **HA Wrapped**, start it, open its Web UI (sidebar **Wrapped**).
+3. Pick your entities (live pickers), set the options, hit **Save &
+   Generate**. The result opens in the sidebar and is also written to
+   `/share/ha-wrapped/ha_wrapped.html`.
+
+The add-on reaches Core through the Supervisor proxy with its own
+credentials — you never create an access token. See
+[`ha_wrapped/DOCS.md`](ha_wrapped/DOCS.md) for details. Prefer the command
+line? The CLI / Docker one-liners below still work unchanged.
+
 ## What it does
 
 - Pulls **yearly totals** from Home Assistant's long-term statistics over
