@@ -24,6 +24,10 @@ renders a self-contained HTML story from `template.html`.
 - `docs/index.html` — pre-rendered demo with sample data, served via
   GitHub Pages (Settings: branch `main`, folder `/docs`).
 - `docs/screenshot.png` — README hero, 480x860 @2x of the first stat card.
+- `ha-addon/` — reference implementation for a standalone HA add-on repo:
+  `config.yaml` (manifest), `Dockerfile`, `run.sh` (converts Supervisor
+  `options.json` → `wrapped.py` config), `DOCS.md`. See the directory for
+  how to publish this as a proper HA add-on repository.
 
 ## Architecture notes
 
@@ -37,9 +41,10 @@ renders a self-contained HTML story from `template.html`.
   - `statistics:` entries -> `recorder/statistics_during_period` over the
     HA WebSocket API, `"month"` period for yearly / `"day"` period for
     monthly. `reduce_stat()` collapses rows; `sum` aggregates use
-    cumulative-sum deltas, `delta` uses `last_state - first_state` for
-    absolute/lifetime counters (e.g. a coffee machine's total brew count
-    — don't use `sum` for those, it adds the raw readings together).
+    cumulative-sum deltas, `min` returns the period minimum, `delta` uses
+    `last_state - first_state` for absolute/lifetime counters (e.g. a coffee
+    machine's total brew count — don't use `sum` for those, it adds the raw
+    readings together).
   - `counts:` entries -> REST `/api/history/period` with
     `minimal_response&no_attributes`; counts transitions INTO `to_state`.
     `entity_id` may be a list — counts and the per-period series are
@@ -60,7 +65,11 @@ renders a self-contained HTML story from `template.html`.
   history) and expects strict JSON back; any failure falls back to plain
   labels. Model: `claude-sonnet-4-6`. `language`, `tone` and
   `period_label` come from config/`compute_period()`.
-- Auth via env: `HA_TOKEN` (required), `ANTHROPIC_API_KEY` (optional).
+- Auth via env: `HA_TOKEN` (required unless `SUPERVISOR_TOKEN` is set),
+  `ANTHROPIC_API_KEY` (optional). When `SUPERVISOR_TOKEN` is present
+  (HA Supervisor add-on context), `ha_url` defaults to
+  `http://supervisor/core/api` and the token is taken from `SUPERVISOR_TOKEN`
+  automatically — no config changes needed.
 - Recap card: the last `.summary` section in `template.html` renders a
   compact grid of every stat (`display_value` + `unit` + `headline`),
   built for screenshots/social sharing. `--export-summary` (in `main()`)
@@ -94,4 +103,4 @@ renders a self-contained HTML story from `template.html`.
 ## Open ideas (not commitments)
 
 - Chunked monthly history queries for `counts` on large recorder DBs.
-- `min`/`count_distinct_days` aggregates; "busiest day" stat.
+- `count_distinct_days` aggregate; "busiest day" stat.

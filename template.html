@@ -185,6 +185,14 @@
     font-size:16px; line-height:1; cursor:pointer;
   }
   .theme:hover{color:var(--accent); border-color:var(--accent)}
+  .share-btn{
+    position:fixed; top:14px; left:60px; z-index:10;
+    width:38px; height:38px; border-radius:50%;
+    border:1px solid var(--line); background:var(--bg2); color:var(--dim);
+    font-size:15px; line-height:1; cursor:pointer; display:none;
+  }
+  .share-btn.visible{display:block}
+  .share-btn:hover{color:var(--accent); border-color:var(--accent)}
   .dots{
     position:fixed; right:22px; top:50%; transform:translateY(-50%);
     display:none; flex-direction:column; gap:12px; z-index:10;
@@ -361,6 +369,7 @@ if(!rendered){
 
 let html = `
 <button class="theme" id="theme" aria-label="${esc(I.theme || "light / dark")}">&#9680;</button>
+<button class="share-btn" id="share-btn" aria-label="share" title="share">&#8599;</button>
 <button class="dbg-btn" id="dbg-btn" aria-label="status" aria-expanded="false">i</button>
 <aside class="dbg" id="dbg">
   <h3>Status</h3>
@@ -431,6 +440,28 @@ document.getElementById("theme").addEventListener("click", () => {
   try{ localStorage.setItem("haw-theme", next); }catch(e){}
 });
 
+// share button: Web Share API when available, falls back to copy link
+const shareBtn = document.getElementById("share-btn");
+if(rendered && navigator.share){
+  shareBtn.classList.add("visible");
+  shareBtn.addEventListener("click", () => {
+    navigator.share({
+      title: `${DATA.house} Wrapped ${DATA.period_label || DATA.year}`,
+      text: DATA.intro_sub || "",
+      url: location.href,
+    }).catch(() => {});
+  });
+} else if(rendered && navigator.clipboard){
+  shareBtn.classList.add("visible");
+  shareBtn.addEventListener("click", () => {
+    navigator.clipboard.writeText(location.href).then(() => {
+      const prev = shareBtn.textContent;
+      shareBtn.textContent = "✓";
+      setTimeout(() => { shareBtn.textContent = prev; }, 1500);
+    }).catch(() => {});
+  });
+}
+
 const cards = [...document.querySelectorAll(".card")];
 
 // section dots (desktop only, via CSS)
@@ -440,14 +471,34 @@ dots.addEventListener("click", e => {
   const b = e.target.closest("button");
   if(b) cards[+b.dataset.i].scrollIntoView({behavior:"smooth"});
 });
+
+let currentCard = 0;
 const watcher = new IntersectionObserver(entries => {
   entries.forEach(e => {
     if(!e.isIntersecting) return;
-    const i = cards.indexOf(e.target);
-    dots.querySelectorAll("button").forEach((b,j) => b.classList.toggle("on", j === i));
+    currentCard = cards.indexOf(e.target);
+    dots.querySelectorAll("button").forEach((b,j) => b.classList.toggle("on", j === currentCard));
   });
 },{threshold:.55});
 cards.forEach(c => watcher.observe(c));
+
+// keyboard navigation: arrow keys / space scroll between cards
+document.addEventListener("keydown", e => {
+  if(e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  if(e.key === "ArrowDown" || e.key === "ArrowRight" || e.key === " "){
+    e.preventDefault();
+    cards[Math.min(currentCard + 1, cards.length - 1)]?.scrollIntoView({behavior:"smooth"});
+  } else if(e.key === "ArrowUp" || e.key === "ArrowLeft"){
+    e.preventDefault();
+    cards[Math.max(currentCard - 1, 0)]?.scrollIntoView({behavior:"smooth"});
+  } else if(e.key === "Home"){
+    e.preventDefault();
+    cards[0]?.scrollIntoView({behavior:"smooth"});
+  } else if(e.key === "End"){
+    e.preventDefault();
+    cards[cards.length - 1]?.scrollIntoView({behavior:"smooth"});
+  }
+});
 
 // fade the card in and roll the digit reels when it scrolls into view
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;

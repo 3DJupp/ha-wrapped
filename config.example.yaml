@@ -32,6 +32,7 @@ house_name: "My Home"    # shown on the intro and outro card
 # aggregate: sum   -> period total of a cumulative sensor (energy, water, ...)
 #            mean  -> period average (temperatures, humidity, ...)
 #            max   -> period peak (power spikes, ...)
+#            min   -> period minimum (coldest night, lowest humidity, ...)
 #            delta -> period total of an absolute/lifetime counter, computed
 #                     as (last reading - first reading) instead of summed.
 #                     Use this for sensors that report a running total since

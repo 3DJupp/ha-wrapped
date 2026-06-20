@@ -3,13 +3,16 @@
 HA Wrapped - a Spotify-Wrapped-style year review for your Home Assistant.
 
 Pulls long-term statistics (WebSocket API) and state-change counts (REST API)
-for a configurable list of entities, optionally generates witty German copy
-via the Claude API, and renders a self-contained shareable HTML file.
+for a configurable list of entities, optionally generates witty copy via the
+Claude API, and renders a self-contained shareable HTML file.
 
 Usage:
     export HA_TOKEN="<long-lived access token>"
     export ANTHROPIC_API_KEY="sk-ant-..."   # optional, for the witty copy
     python3 wrapped.py --config config.yaml
+
+Inside a Home Assistant add-on (SUPERVISOR_TOKEN is set automatically):
+    ha_url and HA_TOKEN are auto-detected; no manual token needed.
 
 Requires: pip install websockets pyyaml requests
 """
@@ -28,6 +31,9 @@ import requests
 import websockets
 import yaml
 
+# True when running inside a Home Assistant Supervisor add-on
+_SUPERVISOR = bool(os.environ.get("SUPERVISOR_TOKEN"))
+
 # ---------------------------------------------------------------- helpers
 
 
@@ -41,6 +47,14 @@ MONTHS = {
            "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"],
     "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+    "fr": ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun",
+           "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"],
+    "es": ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+           "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"],
+    "nl": ["Jan", "Feb", "Mrt", "Apr", "Mei", "Jun",
+           "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"],
+    "it": ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu",
+           "Lug", "Ago", "Set", "Ott", "Nov", "Dic"],
 }
 
 
@@ -55,6 +69,34 @@ def find_template() -> Path:
             return p
     sys.exit("template.html not found (looked in: "
              + ", ".join(str(p) for p in candidates) + ")")
+
+
+def validate_config(cfg: dict):
+    """Exit with a clear message if the config has obvious problems."""
+    errors = []
+    if not cfg.get("ha_url"):
+        errors.append("'ha_url' is required")
+    valid_agg = {"sum", "mean", "max", "min", "delta"}
+    for i, s in enumerate(cfg.get("statistics", [])):
+        if not s.get("entity_id"):
+            errors.append(f"statistics[{i}]: 'entity_id' is required")
+        if not s.get("label"):
+            errors.append(f"statistics[{i}]: 'label' is required")
+        agg = s.get("aggregate", "sum")
+        if agg not in valid_agg:
+            errors.append(f"statistics[{i}]: unknown aggregate '{agg}', "
+                          f"must be one of {sorted(valid_agg)}")
+    for i, c in enumerate(cfg.get("counts", [])):
+        if not c.get("entity_id"):
+            errors.append(f"counts[{i}]: 'entity_id' is required")
+        if not c.get("to_state"):
+            errors.append(f"counts[{i}]: 'to_state' is required")
+        if not c.get("label"):
+            errors.append(f"counts[{i}]: 'label' is required")
+    if errors:
+        for e in errors:
+            print(f"  [FAIL] {e}")
+        sys.exit("Config validation failed.")
 
 
 def check_api(ha_url: str, token: str) -> str:
@@ -183,6 +225,11 @@ def reduce_stat(rows, aggregate):
         vals = [r["max"] for r in rows if r.get("max") is not None]
         series = [r.get("max") or 0.0 for r in rows]
         return (max(vals) if vals else None), series
+
+    if aggregate == "min":
+        vals = [r["min"] for r in rows if r.get("min") is not None]
+        series = [r.get("min") or 0.0 for r in rows]
+        return (min(vals) if vals else None), series
 
     if aggregate == "delta":
         # for sensors that report an absolute/lifetime counter (e.g. a
@@ -341,6 +388,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.yaml")
     ap.add_argument("--output", default=None)
+    ap.add_argument("--output-json", metavar="PATH", default=None,
+                    help="also write the stats payload as JSON "
+                         "(for dashboards, integrations, or debugging)")
     ap.add_argument("--export-summary", action="store_true",
                      help="also export the recap card as a PNG, ready for "
                           "social media (needs Playwright; "
@@ -356,6 +406,15 @@ def main():
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
+
+    # HA Supervisor add-on: auto-fill connection details when present.
+    # SUPERVISOR_TOKEN gives direct access to the HA core API without a
+    # separate long-lived token -- no config changes needed.
+    if _SUPERVISOR:
+        cfg.setdefault("ha_url", "http://supervisor/core/api")
+        if not os.environ.get("HA_TOKEN") and not cfg.get("token"):
+            os.environ["HA_TOKEN"] = os.environ["SUPERVISOR_TOKEN"]
+
     ha_url = cfg["ha_url"]
     token = os.environ.get("HA_TOKEN") or cfg.get("token")
     if not token:
@@ -364,6 +423,8 @@ def main():
     lang = cfg.get("language", "en")
     nfmt = cfg.get("number_format", "de" if lang == "de" else "en")
     tz = cfg.get("tz_offset", "+01:00")
+
+    validate_config(cfg)
 
     period = compute_period(cfg, tz)
     mode, year, month = period["mode"], period["year"], period["month"]
@@ -386,6 +447,8 @@ def main():
     print("Preflight:")
     print(f"  [ OK ] config: {args.config} "
           f"({n_stats} statistics, {n_counts} counts)")
+    if _SUPERVISOR:
+        print("  [ OK ] running as HA Supervisor add-on")
     src = "env HA_TOKEN" if os.environ.get("HA_TOKEN") else "config 'token:'"
     print(f"  [ OK ] HA token: set via {src}")
     if os.environ.get("ANTHROPIC_API_KEY"):
@@ -509,7 +572,7 @@ def main():
         s["headline"] = cc.get("headline", s["label"])
         s["quip"] = cc.get("quip", "")
 
-    i18n = {
+    _i18n_table = {
         "de": {"scroll": "scrollen", "trend": "Verlauf",
                "jan": "Jan", "dec": "Dez", "theme": "Hell / Dunkel",
                "intro_sub": "Was dein Zuhause dieses Jahr so getrieben hat.",
@@ -522,7 +585,32 @@ def main():
                "outro_title": "See you next year.",
                "summary_title": "The Recap",
                "generated_by": "Generated by Home Assistant"},
-    }.get(lang, None) or {
+        "fr": {"scroll": "défiler", "trend": "tendance",
+               "jan": "Jan", "dec": "Déc", "theme": "clair / sombre",
+               "intro_sub": "Ce que votre maison a fait cette année.",
+               "outro_title": "À l'année prochaine.",
+               "summary_title": "Le bilan",
+               "generated_by": "Généré par Home Assistant"},
+        "es": {"scroll": "desplazar", "trend": "tendencia",
+               "jan": "Ene", "dec": "Dic", "theme": "claro / oscuro",
+               "intro_sub": "Lo que tu hogar ha estado haciendo este año.",
+               "outro_title": "Hasta el año que viene.",
+               "summary_title": "El resumen",
+               "generated_by": "Generado por Home Assistant"},
+        "nl": {"scroll": "scrollen", "trend": "verloop",
+               "jan": "Jan", "dec": "Dec", "theme": "licht / donker",
+               "intro_sub": "Wat je huis dit jaar heeft gedaan.",
+               "outro_title": "Tot volgend jaar.",
+               "summary_title": "Het overzicht",
+               "generated_by": "Gegenereerd door Home Assistant"},
+        "it": {"scroll": "scorri", "trend": "andamento",
+               "jan": "Gen", "dec": "Dic", "theme": "chiaro / scuro",
+               "intro_sub": "Cosa ha fatto la tua casa quest'anno.",
+               "outro_title": "Al prossimo anno.",
+               "summary_title": "Il riepilogo",
+               "generated_by": "Generato da Home Assistant"},
+    }
+    i18n = _i18n_table.get(lang) or {
         "scroll": "scroll", "trend": "trend", "jan": "Jan", "dec": "Dec",
         "theme": "light / dark",
         "intro_sub": "", "outro_title": f"Wrapped {period_label}",
@@ -562,13 +650,26 @@ def main():
                             json.dumps(payload, ensure_ascii=False))
     default_name = (f"ha_wrapped_{year}-{month:02d}.html" if mode == "monthly"
                     else f"ha_wrapped_{year}.html")
-    out = Path(args.output or default_name)
+
+    # supervisor add-on: default output goes to the shared /share folder
+    if _SUPERVISOR and not args.output:
+        share = Path("/share/ha-wrapped")
+        share.mkdir(parents=True, exist_ok=True)
+        out = share / default_name
+    else:
+        out = Path(args.output or default_name)
+
     out.write_text(html)
 
     ok = sum(1 for e in entity_status if e["status"].startswith("ok"))
     print(f"Status: {ok}/{len(entity_status)} entities delivered data, "
           f"AI copy: {'generated' if copy else 'fallback labels'}")
     print(f"Done -> {out.resolve()}")
+
+    if args.output_json:
+        json_out = Path(args.output_json)
+        json_out.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+        print(f"JSON -> {json_out.resolve()}")
 
     if args.export_summary:
         try:
