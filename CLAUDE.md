@@ -24,10 +24,14 @@ renders a self-contained HTML story from `template.html`.
 - `docs/index.html` — pre-rendered demo with sample data, served via
   GitHub Pages (Settings: branch `main`, folder `/docs`).
 - `docs/screenshot.png` — README hero, 480x860 @2x of the first stat card.
-- `ha-addon/` — reference implementation for a standalone HA add-on repo:
-  `config.yaml` (manifest), `Dockerfile`, `run.sh` (converts Supervisor
-  `options.json` → `wrapped.py` config), `DOCS.md`. See the directory for
-  how to publish this as a proper HA add-on repository.
+- `ha_wrapped/` — the HA add-on. Directory name matches the add-on slug.
+  `config.yaml` (Supervisor manifest with full schema), `Dockerfile`
+  (installs `ha-wrapped` via `pip` from GitHub — no file duplication),
+  `run.sh` (converts Supervisor `options.json` → `wrapped.py` config,
+  wires `SUPERVISOR_TOKEN` → `HA_TOKEN`), `build.yaml` (multi-arch base
+  images), `DOCS.md` (user-facing add-on docs).
+- `hacs.json` — makes this repo discoverable as a HACS add-on repository.
+- `repository.yaml` — HA Supervisor add-on repository metadata.
 
 ## Architecture notes
 
