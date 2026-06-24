@@ -13,6 +13,10 @@ VM, no copying HTML files around.
   in the Home Assistant sidebar. The entity fields have pickers fed live
   from your instance (the statistics picker only lists entities that
   actually have long-term statistics).
+- **Speaks your language.** The UI itself is available in English, German,
+  French, Spanish, Italian, Dutch and Portuguese, and switches the moment
+  you change the language dropdown. That dropdown also sets the language of
+  the generated wrapped.
 - **HA serves the page.** The rendered wrapped opens right in the sidebar
   (Ingress). It is also written to `/share/ha-wrapped/ha_wrapped.html` so you
   can grab it over Samba/SSH.

@@ -19,8 +19,10 @@ ha_url: http://homeassistant.local:8123
 #                         # just ended, so a run on the 1st covers the
 #                         # previous month -- handy for a monthly cronjob)
 # tz_offset: "+01:00"    # timezone offset used for the period boundaries
-language: en             # language of the generated copy (en, de, ...)
-number_format: en        # en -> 1,234.5   de -> 1.234,5
+language: en             # generated-copy language: en, de, fr, es, it, nl, pt
+number_format: comma_dot # comma_dot 1,234.5 | dot_comma 1.234,5 |
+                         # space_comma 1 234,5 | plain_dot 1234.5
+                         # (legacy "en"/"de" still accepted)
 house_name: "My Home"    # shown on the intro and outro card
 # theme: auto            # auto (follow system) | dark | light;
                          # viewers can still toggle on the page itself
