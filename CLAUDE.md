@@ -104,6 +104,14 @@ dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
   the add-on UI is fully translated and switches live on the language
   dropdown). Keep new copy short and natural.
 
+### Add-on versioning
+
+- Bump `ha_wrapped/config.yaml` `version:` by a **0.0.1 patch each release**
+  (e.g. 1.0.0 -> 1.0.1 -> 1.0.2), and add a matching `CHANGELOG.md` heading.
+  No minor/major jumps unless the owner explicitly asks. The Home Assistant
+  store reads `main` and compares this version against what's installed, so
+  the bump must reach `main` for an update to show.
+
 ### Look & voice (owner preferences)
 
 - The **add-on config UI matches Home Assistant**: HA blue (`#03a9f4`)
