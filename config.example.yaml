@@ -21,7 +21,8 @@ ha_url: http://homeassistant.local:8123
 # tz_offset: "+01:00"    # timezone offset used for the period boundaries
 language: en             # generated-copy language: en, de, fr, es, it, nl, pt
 number_format: comma_dot # comma_dot 1,234.5 | dot_comma 1.234,5 |
-                         # space_comma 1 234,5 | plain_dot 1234.5
+                         # space_comma 1 234,5 | plain_dot 1234.5 |
+                         # plain_comma 1234,5
                          # (legacy "en"/"de" still accepted)
 house_name: "My Home"    # shown on the intro and outro card
 # theme: auto            # auto (follow system) | dark | light;

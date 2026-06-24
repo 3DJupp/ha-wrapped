@@ -61,6 +61,7 @@ NUMBER_FORMATS = {
     "dot_comma": (".", ","),    # 1.234,5
     "space_comma": (" ", ","),  # 1 234,5  (narrow no-break space)
     "plain_dot": ("", "."),     # 1234.5
+    "plain_comma": ("", ","),   # 1234,5
 }
 NUMBER_FORMAT_ALIASES = {"en": "comma_dot", "de": "dot_comma"}
 
@@ -133,6 +134,26 @@ def _tzinfo(tz_offset: str) -> dt.tzinfo:
     return dt.datetime.fromisoformat(f"2000-01-01T00:00:00{tz_offset}").tzinfo
 
 
+def _opt_int(value):
+    """Read an optional integer config value, treating blanks as unset.
+
+    The add-on persists year/month as plain config keys, and an empty field
+    can come back as None, "", or even the string "None"/"auto". Returning
+    None for all of those lets the caller's `or default` pick the right
+    fallback instead of crashing on `int("None")` or interpolating a stray
+    string into an ISO timestamp.
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if s == "" or s.lower() in ("none", "auto", "null"):
+        return None
+    try:
+        return int(s)
+    except ValueError:
+        return None
+
+
 def compute_period(cfg: dict, tz_offset: str = "+01:00") -> dict:
     """Work out the time window for the configured period.
 
@@ -148,15 +169,16 @@ def compute_period(cfg: dict, tz_offset: str = "+01:00") -> dict:
         today = dt.datetime.now(_tzinfo(tz_offset))
         last_month_end = today.replace(day=1) - dt.timedelta(days=1)
         # `or`, not a .get() default: the add-on's merged config carries
-        # explicit year/month keys set to None, so a plain default never fires
-        year = cfg.get("year") or last_month_end.year
-        month = cfg.get("month") or last_month_end.month
+        # explicit year/month keys set to None (or a blank string), so a
+        # plain default never fires. _opt_int coerces those blanks to None.
+        year = _opt_int(cfg.get("year")) or last_month_end.year
+        month = _opt_int(cfg.get("month")) or last_month_end.month
         start = dt.datetime.fromisoformat(
             f"{year}-{month:02d}-01T00:00:00{tz_offset}")
         n_periods = calendar.monthrange(year, month)[1]
         full_end = start + dt.timedelta(days=n_periods)
     else:
-        year = cfg.get("year") or dt.date.today().year
+        year = _opt_int(cfg.get("year")) or dt.date.today().year
         month = None
         start = dt.datetime.fromisoformat(f"{year}-01-01T00:00:00{tz_offset}")
         full_end = dt.datetime.fromisoformat(f"{year + 1}-01-01T00:00:00{tz_offset}")

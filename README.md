@@ -3,12 +3,12 @@
 A Spotify-Wrapped-style year review for your Home Assistant. One Python
 script pulls a full year of statistics from your instance, optionally lets
 an LLM write deadpan one-liners about them, and renders a shareable,
-self-contained HTML story — a vibrant, multi-color look (each stat card
-gets its own accent) in dark *and* light (follows your system, toggleable
-on the page), mechanical odometer digits that roll in as you scroll,
-monthly bar charts with a label under every bar, and a layout that works
-on phones and desktops alike. A built-in status panel (the ⓘ button) shows
-what was collected, what was skipped, and whether the AI copy was used.
+self-contained HTML page. Each stat card gets its own color, it has a dark
+and a light mode (follows your system, toggleable on the page), the number
+digits roll in like an odometer as you scroll, the charts put a label under
+every bar, and it works on phones and desktops. A built-in status panel
+(the ⓘ button) shows what was collected, what was skipped, and whether the
+AI copy was used.
 
 <img width="380" alt="HA Wrapped demo" src="docs/wrapped.gif" />
 
@@ -17,6 +17,23 @@ what was collected, what was skipped, and whether the AI copy was used.
 
 > *"Your shutters traveled 4.2 km this year. If this were an elevator,
 > it would deserve a tip."*
+
+## Two ways to run it
+
+Pick one, they produce the same page:
+
+- **As a Home Assistant add-on** (most people want this). You add this
+  GitHub repo to your **Add-on Store**, install HA Wrapped, and it runs
+  *inside* Home Assistant: config in the UI, no access token, page served in
+  the sidebar. Jump to [Install as a Home Assistant
+  add-on](#install-as-a-home-assistant-add-on-recommended).
+- **Self-hosted, from the command line.** You run `wrapped.py` yourself
+  (uvx, pipx, Docker, or a checkout) against your HA instance with a
+  long-lived token, and get an HTML file you host wherever you like. Jump to
+  [Run it yourself](#run-it-yourself-cli--docker).
+
+The add-on does not touch HACS, and the CLI does not need the add-on, they
+are independent. The rest of this README covers both.
 
 ## Install as a Home Assistant add-on (recommended)
 
@@ -75,7 +92,10 @@ line? The CLI / Docker one-liners below still work unchanged.
 Only aggregated numbers ever leave your network, and only if you opt into
 the LLM copy. No entity history is uploaded anywhere.
 
-## Quick start
+## Run it yourself (CLI / Docker)
+
+This is the self-hosted path: you run the script, against your own HA
+instance, and keep the resulting HTML file. No add-on involved.
 
 Grab the config, fill in your entities, create a
 [long-lived access token](https://my.home-assistant.io/redirect/profile/)
@@ -172,7 +192,7 @@ for the fully commented reference):
 | `month` | previous month | `period: monthly` only, `1`-`12` |
 | `tz_offset` | `+01:00` | timezone offset for the period boundaries |
 | `language` | `en` | copy + UI language: `en`, `de`, `fr`, `es`, `it`, `nl`, `pt` |
-| `number_format` | follows language | `comma_dot` 1,234.5 · `dot_comma` 1.234,5 · `space_comma` 1 234,5 · `plain_dot` 1234.5 |
+| `number_format` | follows language | `comma_dot` 1,234.5 · `dot_comma` 1.234,5 · `space_comma` 1 234,5 · `plain_dot` 1234.5 · `plain_comma` 1234,5 |
 | `house_name` | `My Home` | shown on the intro and outro card |
 | `theme` | `auto` | `auto` (follow system) · `dark` · `light` |
 | `tone` | `dry, witty, deadpan` | personality of the AI copy |
