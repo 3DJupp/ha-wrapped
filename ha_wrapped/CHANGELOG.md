@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.3
+
+- Fixed a crash when saving the config (`module 'wrapped' has no attribute
+  '_opt_int'`). The year/month normaliser is now defined inside the add-on
+  itself instead of reaching into the engine, so saving no longer depends on
+  the exact engine version the image was built against.
+
 ## 1.0.2
 
 - Fixed another Generate crash (`Invalid isoformat string:

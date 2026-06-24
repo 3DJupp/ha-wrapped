@@ -50,6 +50,30 @@ DEFAULT_CONFIG = {
 }
 
 
+def _opt_int(value):
+    """Read an optional integer config value, treating blanks as unset.
+
+    The UI sends year/month as plain strings, and an empty field can arrive
+    as None, "", or even "None"/"auto"/"null". Returning None for all of
+    those lets compute_period()'s `or default` pick the right fallback
+    instead of crashing on int("None") or interpolating a stray string into
+    an ISO timestamp.
+
+    Defined locally (rather than reused from the engine) on purpose: the
+    add-on COPYs this server.py but pip-installs wrapped.py from a separate
+    git ref, so server.py must not depend on freshly-added engine helpers.
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if s == "" or s.lower() in ("none", "auto", "null"):
+        return None
+    try:
+        return int(s)
+    except ValueError:
+        return None
+
+
 def token() -> str:
     return os.environ.get("SUPERVISOR_TOKEN", "")
 
@@ -85,7 +109,7 @@ def save_config(cfg: dict) -> None:
     # so a stray "None"/"auto"/"" string never lands in config.yaml and trips
     # up compute_period() (it would interpolate straight into an ISO timestamp).
     for k in ("year", "month"):
-        cfg[k] = wrapped._opt_int(cfg.get(k))
+        cfg[k] = _opt_int(cfg.get(k))
     # don't persist empty values -- let compute_period() pick its defaults
     clean = {k: v for k, v in cfg.items() if v not in (None, "")}
     CONFIG_PATH.write_text(
