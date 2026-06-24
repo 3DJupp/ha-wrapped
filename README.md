@@ -10,7 +10,7 @@ monthly bar charts with a label under every bar, and a layout that works
 on phones and desktops alike. A built-in status panel (the ⓘ button) shows
 what was collected, what was skipped, and whether the AI copy was used.
 
-<img width="740" height="1260" alt="demo" src="https://github.com/user-attachments/assets/2d62b6bd-3a10-4efa-8ab7-4fc70fd2c561" />
+<img width="380" alt="HA Wrapped demo" src="docs/wrapped.gif" />
 
 
 **[Live demo](https://3djupp.github.io/ha-wrapped/)** — sample data, real scrolling odometers.
@@ -21,15 +21,33 @@ what was collected, what was skipped, and whether the AI copy was used.
 ## Install as a Home Assistant add-on (recommended)
 
 Home Assistant is already running, so the cleanest way to use HA Wrapped is
-the dedicated add-on — **no long-lived token, config in the UI, and the page
-served right in the sidebar**:
+the dedicated **add-on** — **no long-lived token, config in the UI, and the
+page served right in the sidebar**.
 
-1. Settings → Add-ons → Add-on store → ⋮ → **Repositories**, add
-   `https://github.com/3DJupp/ha-wrapped`.
-2. Install **HA Wrapped**, start it, open its Web UI (sidebar **Wrapped**).
-3. Pick your entities (live pickers), set the options, hit **Save &
-   Generate**. The result opens in the sidebar and is also written to
-   `/share/ha-wrapped/ha_wrapped.html`.
+> **Add-on, not a HACS integration.** This repository is a Home Assistant
+> **add-on repository** (it installs through Settings → Add-ons, managed by
+> the Supervisor). HACS only manages integrations and dashboard resources, so
+> it can't and won't list this — add the repository to the **Add-on Store**,
+> not to HACS.
+
+**One click** — add the repository to your Home Assistant:
+
+[![Add repository to your Home Assistant instance.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2F3DJupp%2Fha-wrapped)
+
+Then: install **HA Wrapped** from the store, start it, and open its Web UI
+(sidebar **Wrapped**).
+
+<details>
+<summary>…or add it manually</summary>
+
+1. Settings → Add-ons → Add-on store → ⋮ → **Repositories**, paste
+   `https://github.com/3DJupp/ha-wrapped`, **Add**.
+2. Refresh the store, install **HA Wrapped**, start it.
+</details>
+
+Once it's running: pick your entities (live pickers), set the options, hit
+**Save & Generate**. The result opens in the sidebar and is also written to
+`/share/ha-wrapped/ha_wrapped.html`.
 
 The add-on reaches Core through the Supervisor proxy with its own
 credentials — you never create an access token. See

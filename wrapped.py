@@ -58,16 +58,21 @@ def find_template() -> Path:
 
 
 def check_api(ha_url: str, token: str) -> str:
-    """Ping the HA REST API; returns the API message or exits with help."""
+    """Ping the HA REST API; returns the API message or raises RuntimeError.
+
+    Raises rather than exits so the add-on server (which runs the engine in a
+    worker thread) can turn a failure into a clean error response instead of
+    killing the request. The CLI's main() catches it and exits with help."""
     try:
         r = requests.get(f"{ha_url.rstrip('/')}/api/",
                          headers={"Authorization": f"Bearer {token}"},
                          timeout=15)
     except requests.RequestException as e:
-        sys.exit(f"  [FAIL] cannot reach {ha_url}: {e}")
+        raise RuntimeError(f"cannot reach {ha_url}: {e}")
     if r.status_code == 401:
-        sys.exit("  [FAIL] HA rejected the token (401). Create a new "
-                 "long-lived access token in your HA profile.")
+        raise RuntimeError(
+            "HA rejected the token (401). On the CLI, create a fresh "
+            "long-lived access token in your HA profile.")
     r.raise_for_status()
     return r.json().get("message", "API running.")
 
@@ -655,7 +660,7 @@ def main():
                            output=args.output, debug=args.debug,
                            export_summary=args.export_summary,
                            summary_size=args.summary_size)
-    except ValueError as e:
+    except (ValueError, RuntimeError) as e:
         sys.exit(f"  [FAIL] {e}")
 
 

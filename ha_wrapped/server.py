@@ -144,9 +144,11 @@ async def handle_generate(request: web.Request) -> web.Response:
         result = await loop.run_in_executor(None, lambda: wrapped.collect_and_render(
             cfg, ha_url=SUPERVISOR_CORE, token=token(), ws_url=SUPERVISOR_WS,
             output=str(OUTPUT_HTML), log=log))
-    except Exception as e:  # noqa: BLE001
+    except (Exception, SystemExit) as e:  # noqa: BLE001
+        # SystemExit too: find_template() exits if the template is missing,
+        # and that surfaces here through the worker thread.
         return web.json_response(
-            {"ok": False, "error": str(e), "log": logs}, status=400)
+            {"ok": False, "error": str(e) or repr(e), "log": logs}, status=400)
 
     # mirror to /share for Samba/SSH access (best-effort)
     try:
