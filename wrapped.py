@@ -37,10 +37,39 @@ def iso(t: dt.datetime) -> str:
 
 # month abbreviations for the chart axis and the partial-year range label
 MONTHS = {
-    "de": ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun",
-           "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"],
     "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+    "de": ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun",
+           "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"],
+    "fr": ["Janv", "Févr", "Mars", "Avr", "Mai", "Juin",
+           "Juil", "Août", "Sept", "Oct", "Nov", "Déc"],
+    "es": ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+           "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"],
+    "it": ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu",
+           "Lug", "Ago", "Set", "Ott", "Nov", "Dic"],
+    "nl": ["Jan", "Feb", "Mrt", "Apr", "Mei", "Jun",
+           "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"],
+    "pt": ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+           "Jul", "Ago", "Set", "Out", "Nov", "Dez"],
+}
+
+# Thousands / decimal separators, keyed by neutral names (so the option is
+# named after how the number looks, not after a country). Legacy "en"/"de"
+# configs still resolve via NUMBER_FORMAT_ALIASES.
+NUMBER_FORMATS = {
+    "comma_dot": (",", "."),    # 1,234.5
+    "dot_comma": (".", ","),    # 1.234,5
+    "space_comma": (" ", ","),  # 1 234,5  (narrow no-break space)
+    "plain_dot": ("", "."),     # 1234.5
+}
+NUMBER_FORMAT_ALIASES = {"en": "comma_dot", "de": "dot_comma"}
+
+# Sensible default separators per language, used only when number_format is
+# not set explicitly.
+LANG_NUMBER_DEFAULT = {
+    "en": "comma_dot", "de": "dot_comma", "fr": "space_comma",
+    "es": "dot_comma", "it": "dot_comma", "nl": "dot_comma",
+    "pt": "dot_comma",
 }
 
 
@@ -118,14 +147,16 @@ def compute_period(cfg: dict, tz_offset: str = "+01:00") -> dict:
     if mode == "monthly":
         today = dt.datetime.now(_tzinfo(tz_offset))
         last_month_end = today.replace(day=1) - dt.timedelta(days=1)
-        year = cfg.get("year", last_month_end.year)
-        month = cfg.get("month", last_month_end.month)
+        # `or`, not a .get() default: the add-on's merged config carries
+        # explicit year/month keys set to None, so a plain default never fires
+        year = cfg.get("year") or last_month_end.year
+        month = cfg.get("month") or last_month_end.month
         start = dt.datetime.fromisoformat(
             f"{year}-{month:02d}-01T00:00:00{tz_offset}")
         n_periods = calendar.monthrange(year, month)[1]
         full_end = start + dt.timedelta(days=n_periods)
     else:
-        year = cfg.get("year", dt.date.today().year)
+        year = cfg.get("year") or dt.date.today().year
         month = None
         start = dt.datetime.fromisoformat(f"{year}-01-01T00:00:00{tz_offset}")
         full_end = dt.datetime.fromisoformat(f"{year + 1}-01-01T00:00:00{tz_offset}")
@@ -320,8 +351,12 @@ def claude_copy(stats, period_label, language="en", tone="dry, witty, deadpan",
         f"You write the copy for a 'Home Assistant Wrapped' page covering "
         f"'{period_label}', a Spotify-Wrapped-style review for a smart "
         "home.\n"
-        f"Language: {language}. Tone: {tone}. Short and punchy, "
-        "no cringe, no emojis, no exclamation mark spam.\n\n"
+        f"Language: {language}. Tone: {tone}. Short and punchy.\n"
+        "Write like a person, not a marketing deck or an AI assistant: "
+        "plain words, no cringe, no emojis, no exclamation-mark spam, no "
+        "em dashes or en dashes (use commas, periods or parentheses), and "
+        "skip filler like 'dive in', 'unleash', 'elevate' or 'in a world "
+        "where'.\n\n"
         f"Here are the stats for this period as JSON:\n"
         f"{json.dumps(facts, ensure_ascii=False)}\n\n"
         "Respond ONLY with a JSON object, no markdown fences:\n"
@@ -381,13 +416,17 @@ def export_summary_png(html_path: Path, out_path: Path, width: int, height: int)
 # ------------------------------------------------------------- main
 
 
-def fmt(value, decimals, number_format="en"):
+def fmt(value, decimals, number_format="comma_dot"):
     if value is None:
         return "?"
+    decimals = 0 if decimals is None else int(decimals)
+    nf = NUMBER_FORMAT_ALIASES.get(number_format, number_format)
+    thousands, decimal = NUMBER_FORMATS.get(nf, NUMBER_FORMATS["comma_dot"])
+    # build with canonical separators, then swap via placeholders so the
+    # source separators never clobber the target ones
     s = f"{value:,.{decimals}f}"
-    if number_format == "de":
-        s = s.replace(",", "X").replace(".", ",").replace("X", ".")
-    return s
+    s = s.replace(",", "\x00").replace(".", "\x01")
+    return s.replace("\x00", thousands).replace("\x01", decimal)
 
 
 def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
@@ -402,7 +441,7 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
     path, per-entity status, and whether the AI copy was used.
     """
     lang = cfg.get("language", "en")
-    nfmt = cfg.get("number_format", "de" if lang == "de" else "en")
+    nfmt = cfg.get("number_format") or LANG_NUMBER_DEFAULT.get(lang, "comma_dot")
     tz = cfg.get("tz_offset", "+01:00")
     api_key = cfg.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")
 
@@ -466,7 +505,7 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
             unit_word = "days" if mode == "monthly" else "months"
             entity_status.append({"id": s["entity_id"], "kind": "statistics",
                                   "status": f"ok ({len(rows)} {unit_word})"})
-            scale = s.get("scale", 1.0)
+            scale = s.get("scale") or 1.0
             total *= scale
             series = [v * scale for v in series]
             stats_out.append({
@@ -498,7 +537,7 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
         entity_status.append({"id": ids_label, "kind": "counts",
                               "status": f"ok ({n} events)" if n
                               else "no events"})
-        scale = c.get("scale", 1.0)
+        scale = c.get("scale") or 1.0
         value = n * scale
         stats_out.append({
             "id": ids_label,
@@ -547,18 +586,48 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
         s["quip"] = cc.get("quip", "")
 
     i18n = {
-        "de": {"scroll": "scrollen", "trend": "Verlauf",
-               "jan": "Jan", "dec": "Dez", "theme": "Hell / Dunkel",
-               "intro_sub": "Was dein Zuhause dieses Jahr so getrieben hat.",
-               "outro_title": "Bis naechstes Jahr.",
-               "summary_title": "Die Bilanz",
-               "generated_by": "Erstellt mit Home Assistant"},
         "en": {"scroll": "scroll", "trend": "trend",
-               "jan": "Jan", "dec": "Dec", "theme": "light / dark",
-               "intro_sub": "What your home has been up to this year.",
+               "theme": "light / dark",
+               "intro_sub": "What your home got up to this year.",
                "outro_title": "See you next year.",
                "summary_title": "The Recap",
                "generated_by": "Generated by Home Assistant"},
+        "de": {"scroll": "scrollen", "trend": "Verlauf",
+               "theme": "Hell / Dunkel",
+               "intro_sub": "Was dein Zuhause dieses Jahr so getrieben hat.",
+               "outro_title": "Bis nächstes Jahr.",
+               "summary_title": "Die Bilanz",
+               "generated_by": "Erstellt mit Home Assistant"},
+        "fr": {"scroll": "défiler", "trend": "tendance",
+               "theme": "clair / sombre",
+               "intro_sub": "Ce que votre maison a fait cette année.",
+               "outro_title": "À l'année prochaine.",
+               "summary_title": "Le récap",
+               "generated_by": "Généré par Home Assistant"},
+        "es": {"scroll": "desplázate", "trend": "tendencia",
+               "theme": "claro / oscuro",
+               "intro_sub": "Lo que hizo tu casa este año.",
+               "outro_title": "Hasta el año que viene.",
+               "summary_title": "El resumen",
+               "generated_by": "Generado por Home Assistant"},
+        "it": {"scroll": "scorri", "trend": "andamento",
+               "theme": "chiaro / scuro",
+               "intro_sub": "Cosa ha combinato casa tua quest'anno.",
+               "outro_title": "Al prossimo anno.",
+               "summary_title": "Il riepilogo",
+               "generated_by": "Generato da Home Assistant"},
+        "nl": {"scroll": "scroll", "trend": "trend",
+               "theme": "licht / donker",
+               "intro_sub": "Wat je huis dit jaar heeft uitgespookt.",
+               "outro_title": "Tot volgend jaar.",
+               "summary_title": "De samenvatting",
+               "generated_by": "Gegenereerd door Home Assistant"},
+        "pt": {"scroll": "rolar", "trend": "tendência",
+               "theme": "claro / escuro",
+               "intro_sub": "O que a sua casa fez este ano.",
+               "outro_title": "Até para o ano.",
+               "summary_title": "O resumo",
+               "generated_by": "Gerado pelo Home Assistant"},
     }.get(lang, None) or {
         "scroll": "scroll", "trend": "trend", "jan": "Jan", "dec": "Dec",
         "theme": "light / dark",

@@ -30,24 +30,27 @@ page served right in the sidebar**.
 > it can't and won't list this — add the repository to the **Add-on Store**,
 > not to HACS.
 
-**One click** — add the repository to your Home Assistant:
+**Add the repository**, then install **HA Wrapped** from the store, start it,
+and open its Web UI (sidebar **Wrapped**). Two ways to add the repository:
+
+1. **Manually (works everywhere).** Settings → Add-ons → Add-on store → ⋮ →
+   **Repositories**, paste `https://github.com/3DJupp/ha-wrapped`, **Add**.
+   Refresh the store, then install **HA Wrapped**.
+2. **One click** with the badge below (needs
+   [My Home Assistant](https://www.home-assistant.io/integrations/my/) set up
+   on your instance). It only *adds the repository* — you still install
+   **HA Wrapped** from the store afterwards.
 
 [![Add repository to your Home Assistant instance.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2F3DJupp%2Fha-wrapped)
 
-Then: install **HA Wrapped** from the store, start it, and open its Web UI
-(sidebar **Wrapped**).
-
-<details>
-<summary>…or add it manually</summary>
-
-1. Settings → Add-ons → Add-on store → ⋮ → **Repositories**, paste
-   `https://github.com/3DJupp/ha-wrapped`, **Add**.
-2. Refresh the store, install **HA Wrapped**, start it.
-</details>
-
 Once it's running: pick your entities (live pickers), set the options, hit
 **Save & Generate**. The result opens in the sidebar and is also written to
-`/share/ha-wrapped/ha_wrapped.html`.
+`/share/ha-wrapped/ha_wrapped.html`. The config UI matches Home Assistant and
+is available in seven languages, switching live as you pick one:
+
+| Dark | Light |
+|---|---|
+| ![HA Wrapped add-on config UI, dark theme](docs/config-dark.png) | ![HA Wrapped add-on config UI, light theme](docs/config-light.png) |
 
 The add-on reaches Core through the Supervisor proxy with its own
 credentials — you never create an access token. See
@@ -168,8 +171,8 @@ for the fully commented reference):
 | `year` | current year | the year to wrap (or the year of `month`, for `period: monthly`) |
 | `month` | previous month | `period: monthly` only, `1`-`12` |
 | `tz_offset` | `+01:00` | timezone offset for the period boundaries |
-| `language` | `en` | language for the generated copy (`en`, `de`, ...) |
-| `number_format` | follows language | `en` → 1,234.5 · `de` → 1.234,5 |
+| `language` | `en` | copy + UI language: `en`, `de`, `fr`, `es`, `it`, `nl`, `pt` |
+| `number_format` | follows language | `comma_dot` 1,234.5 · `dot_comma` 1.234,5 · `space_comma` 1 234,5 · `plain_dot` 1234.5 |
 | `house_name` | `My Home` | shown on the intro and outro card |
 | `theme` | `auto` | `auto` (follow system) · `dark` · `light` |
 | `tone` | `dry, witty, deadpan` | personality of the AI copy |

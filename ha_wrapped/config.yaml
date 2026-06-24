@@ -3,7 +3,7 @@
 # in the add-on's own Ingress UI (with entity pickers), so the native schema
 # here stays intentionally small.
 name: HA Wrapped
-version: "1.0.0"
+version: "1.1.0"
 slug: ha_wrapped
 description: A Spotify-Wrapped-style year (or month) review for your Home Assistant.
 url: https://github.com/3DJupp/ha-wrapped/tree/main/ha_wrapped
@@ -19,7 +19,7 @@ init: false
 # authentication, so no port needs to be exposed and no token is required.
 ingress: true
 ingress_port: 8099
-panel_icon: mdi:gift-outline
+panel_icon: mdi:chart-box
 panel_title: Wrapped
 
 # Reach Home Assistant Core through the Supervisor proxy (statistics over the
