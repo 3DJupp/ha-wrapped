@@ -23,7 +23,9 @@ dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
   it spins up its own asyncio loop, `/view`+`/download` serve the result),
   `Dockerfile`/`build.yaml`/`run.sh` build it (engine installed from git via
   the `HA_WRAPPED_REF` build arg), `DOCS.md`/`CHANGELOG.md` are add-on docs.
-  `repository.yaml` (repo root) marks the repo as an add-on repository.
+  `icon.png` (256x256) + `logo.png` (600x150) are the store/sidebar art (a
+  blue bar-chart mark). `repository.yaml` (repo root) marks the repo as an
+  add-on repository.
 - `template.html` — HTML/CSS/JS template. The quoted token
   `"__WRAPPED_DATA__"` is replaced with a JSON payload at render time
   (quoted so the raw template stays valid JS and can self-diagnose).
@@ -38,6 +40,9 @@ dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
 - `docs/index.html` — pre-rendered demo with sample data, served via
   GitHub Pages (Settings: branch `main`, folder `/docs`).
 - `docs/screenshot.png` — README hero, 480x860 @2x of the first stat card.
+- `docs/config-dark.png` / `docs/config-light.png` — add-on config-UI shots
+  (EN/dark, DE/light) shown side by side in the README. Regenerate on
+  notable UI changes (see Verifying changes).
 
 ## Architecture notes
 
@@ -89,7 +94,27 @@ dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
 - No personal data in the repo: no real entity IDs, hostnames, names, or
   real consumption numbers. Demo data is invented.
 - Number formatting is manual (`fmt()`), not locale-dependent, so output
-  is reproducible on any system.
+  is reproducible on any system. `number_format` is named after how the
+  number looks, not after a country: `comma_dot` (1,234.5), `dot_comma`
+  (1.234,5), `space_comma` (1 234,5), `plain_dot` (1234.5). Legacy `en`/`de`
+  still resolve via `NUMBER_FORMAT_ALIASES`; the add-on UI migrates them.
+- Languages: en, de, fr, es, it, nl, pt. Adding one means month names +
+  output strings in `wrapped.py` (`MONTHS`, the `i18n` dict) **and** the
+  full UI string set in `server.py`'s `I18N` (all keys, every language —
+  the add-on UI is fully translated and switches live on the language
+  dropdown). Keep new copy short and natural.
+
+### Look & voice (owner preferences)
+
+- The **add-on config UI matches Home Assistant**: HA blue (`#03a9f4`)
+  accent, HA-flavoured light/dark surfaces, native dropdowns themed (not
+  white). No violet, no gift emoji — `ha_wrapped/icon.png` + `logo.png` are
+  a blue bar-chart mark, `panel_icon` is `mdi:chart-box`. The *generated
+  wrapped page* keeps its Spotify-green look on purpose (it's the homage);
+  only the config UI tracks HA.
+- **Voice:** generated copy and UI text avoid the over-polished AI register
+  and em/en dashes (the Claude prompt says so explicitly). Date ranges
+  (`Jan – Jun 2025`) keep the en-dash — that's typography, not flourish.
 - Keep `wrapped.py` stdlib + `websockets`/`pyyaml`/`requests` only.
   Playwright is an optional extra (`pyproject.toml` `[export]`), lazily
   imported only inside `export_summary_png()` for `--export-summary`.
@@ -104,6 +129,13 @@ dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
 - Regenerate `docs/screenshot.png` with Playwright after visual changes:
   480x860 viewport, deviceScaleFactor 2, scroll to `.card` index 1, wait
   ~2.5s for the odometer animation.
+- **After any notable add-on UI change, regenerate the config-UI
+  screenshots** `docs/config-dark.png` (EN, dark) and `docs/config-light.png`
+  (DE, light), shown side by side in a 2-column table in the README. Recipe:
+  extract `INDEX_HTML` from `server.py`, stub `window.fetch` so
+  `api/config` returns a small sample config (one statistic, one count) in
+  the target language + a matching `number_format`, render with Playwright
+  at 1240px wide, deviceScaleFactor 2, `colorScheme` dark/light, fullPage.
 
 ## Open ideas (not commitments)
 

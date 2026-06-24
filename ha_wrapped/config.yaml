@@ -19,7 +19,7 @@ init: false
 # authentication, so no port needs to be exposed and no token is required.
 ingress: true
 ingress_port: 8099
-panel_icon: mdi:gift-outline
+panel_icon: mdi:chart-box
 panel_title: Wrapped
 
 # Reach Home Assistant Core through the Supervisor proxy (statistics over the

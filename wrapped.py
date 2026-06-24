@@ -147,14 +147,16 @@ def compute_period(cfg: dict, tz_offset: str = "+01:00") -> dict:
     if mode == "monthly":
         today = dt.datetime.now(_tzinfo(tz_offset))
         last_month_end = today.replace(day=1) - dt.timedelta(days=1)
-        year = cfg.get("year", last_month_end.year)
-        month = cfg.get("month", last_month_end.month)
+        # `or`, not a .get() default: the add-on's merged config carries
+        # explicit year/month keys set to None, so a plain default never fires
+        year = cfg.get("year") or last_month_end.year
+        month = cfg.get("month") or last_month_end.month
         start = dt.datetime.fromisoformat(
             f"{year}-{month:02d}-01T00:00:00{tz_offset}")
         n_periods = calendar.monthrange(year, month)[1]
         full_end = start + dt.timedelta(days=n_periods)
     else:
-        year = cfg.get("year", dt.date.today().year)
+        year = cfg.get("year") or dt.date.today().year
         month = None
         start = dt.datetime.fromisoformat(f"{year}-01-01T00:00:00{tz_offset}")
         full_end = dt.datetime.fromisoformat(f"{year + 1}-01-01T00:00:00{tz_offset}")
@@ -417,6 +419,7 @@ def export_summary_png(html_path: Path, out_path: Path, width: int, height: int)
 def fmt(value, decimals, number_format="comma_dot"):
     if value is None:
         return "?"
+    decimals = 0 if decimals is None else int(decimals)
     nf = NUMBER_FORMAT_ALIASES.get(number_format, number_format)
     thousands, decimal = NUMBER_FORMATS.get(nf, NUMBER_FORMATS["comma_dot"])
     # build with canonical separators, then swap via placeholders so the
@@ -502,7 +505,7 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
             unit_word = "days" if mode == "monthly" else "months"
             entity_status.append({"id": s["entity_id"], "kind": "statistics",
                                   "status": f"ok ({len(rows)} {unit_word})"})
-            scale = s.get("scale", 1.0)
+            scale = s.get("scale") or 1.0
             total *= scale
             series = [v * scale for v in series]
             stats_out.append({
@@ -534,7 +537,7 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
         entity_status.append({"id": ids_label, "kind": "counts",
                               "status": f"ok ({n} events)" if n
                               else "no events"})
-        scale = c.get("scale", 1.0)
+        scale = c.get("scale") or 1.0
         value = n * scale
         stats_out.append({
             "id": ids_label,

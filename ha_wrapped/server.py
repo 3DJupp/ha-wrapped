@@ -240,7 +240,7 @@ INDEX_HTML = r"""<!doctype html>
   }
   * { box-sizing: border-box; }
   body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-         margin: 0; padding: 1.5rem; max-width: 920px; margin-inline: auto;
+         margin: 0; padding: 1.5rem 2rem; max-width: 1240px; margin-inline: auto;
          line-height: 1.45; background: var(--bg); color: var(--text); }
   h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
   h2 { font-size: 1.1rem; margin: 1.75rem 0 .5rem; }
@@ -256,9 +256,9 @@ INDEX_HTML = r"""<!doctype html>
     outline: none; border-color: var(--primary);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 30%, transparent); }
   .grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-  .row { display: grid; gap: .5rem; align-items: end;
-         grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)) 2.5rem;
-         padding: .6rem; border-radius: 10px;
+  .row { display: grid; gap: .6rem; align-items: end;
+         grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)) 2.5rem;
+         padding: .7rem; border-radius: 10px;
          background: var(--row); margin-bottom: .5rem; }
   .row .del { height: 2.3rem; align-self: end; border: none; cursor: pointer;
     border-radius: 8px; background: #d9534f22; color: #d9534f; font-size: 1.1rem; }
