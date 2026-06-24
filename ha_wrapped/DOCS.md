@@ -19,10 +19,16 @@ VM, no copying HTML files around.
 
 ## Install
 
-1. Settings → Add-ons → Add-on store → ⋮ → **Repositories**, add:
-   `https://github.com/3DJupp/ha-wrapped`
-2. Install **HA Wrapped**, start it, then open the UI (sidebar **Wrapped**,
-   or the add-on's **Open Web UI**).
+This is a Home Assistant **add-on** (installed via the Add-on Store /
+Supervisor), *not* a HACS integration — HACS does not manage add-ons.
+
+One click to add the repository:
+
+[![Add repository to your Home Assistant instance.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2F3DJupp%2Fha-wrapped)
+
+Or manually: Settings → Add-ons → Add-on store → ⋮ → **Repositories**, add
+`https://github.com/3DJupp/ha-wrapped`. Then install **HA Wrapped**, start it,
+and open the UI (sidebar **Wrapped**, or the add-on's **Open Web UI**).
 
 ## Use
 

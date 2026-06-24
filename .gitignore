@@ -1,4 +1,6 @@
-config.yaml
+# only the CLI's real config at the repo root -- NOT the add-on manifest
+# at ha_wrapped/config.yaml (leading slash anchors this to the root)
+/config.yaml
 ha_wrapped_*.html
 __pycache__/
 .env
