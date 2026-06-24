@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0
+## 1.0.1
 
 - Fixed a crash on Generate (`unsupported format string passed to
   NoneType.__format__`) when year/month were left on auto.
