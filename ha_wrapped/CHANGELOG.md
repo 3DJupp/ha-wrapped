@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.2
+
+- Fixed another Generate crash (`Invalid isoformat string:
+  'None-01-01...'`) that could happen if a stray "None"/"auto" year or month
+  ever got saved. Year and month are now coerced to a real number (or
+  dropped) both when saved and when read.
+- New number format `1234,5` (no thousands separator, comma decimal).
+- The Theme dropdown now re-themes the config UI itself the moment you pick
+  dark/light/auto, so you see what you'll get.
+- Mobile layout: fields get two columns with more breathing room instead of
+  being crammed, and the remove button drops to its own line. Long labels
+  (e.g. French) no longer push their input out of line.
+- Set `log_level` to `debug` or `trace` (Configuration tab) to dump the raw
+  statistic rows into the log when you Generate, for chasing down empty or
+  odd stats.
+
 ## 1.0.1
 
 - Fixed a crash on Generate (`unsupported format string passed to

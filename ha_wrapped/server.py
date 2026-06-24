@@ -15,6 +15,7 @@ No long-lived token: Core is reached via http(ws)://supervisor/core using the
 add-on's own SUPERVISOR_TOKEN.
 """
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -53,6 +54,23 @@ def token() -> str:
     return os.environ.get("SUPERVISOR_TOKEN", "")
 
 
+def log_level() -> str:
+    """The add-on's `log_level` option (set on the Configuration tab).
+
+    Supervisor writes the add-on options to /data/options.json. At `debug`
+    or `trace` the engine dumps the raw statistic rows it pulled, which lands
+    in both the add-on Log tab (stdout) and the on-page log box -- handy when
+    a stat comes back empty or with surprising numbers.
+    """
+    opts = Path("/data/options.json")
+    if opts.exists():
+        try:
+            return (json.loads(opts.read_text()).get("log_level") or "info").lower()
+        except Exception:  # noqa: BLE001
+            pass
+    return os.environ.get("LOG_LEVEL", "info").lower()
+
+
 def load_config() -> dict:
     cfg = {}
     if CONFIG_PATH.exists():
@@ -62,7 +80,13 @@ def load_config() -> dict:
 
 def save_config(cfg: dict) -> None:
     DATA.mkdir(parents=True, exist_ok=True)
-    # don't persist empty year/month -- let compute_period() pick its defaults
+    cfg = dict(cfg)
+    # year/month are "auto" when unset -- normalise to a real int or drop them,
+    # so a stray "None"/"auto"/"" string never lands in config.yaml and trips
+    # up compute_period() (it would interpolate straight into an ISO timestamp).
+    for k in ("year", "month"):
+        cfg[k] = wrapped._opt_int(cfg.get(k))
+    # don't persist empty values -- let compute_period() pick its defaults
     clean = {k: v for k, v in cfg.items() if v not in (None, "")}
     CONFIG_PATH.write_text(
         yaml.safe_dump(clean, sort_keys=False, allow_unicode=True))
@@ -138,12 +162,16 @@ async def handle_generate(request: web.Request) -> web.Response:
         logs.append(str(msg))
         print(msg, flush=True)
 
+    debug = log_level() in ("debug", "trace")
+    if debug:
+        log(f"  [debug] log_level={log_level()}: dumping raw statistic rows")
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(None, lambda: wrapped.collect_and_render(
             cfg, ha_url=SUPERVISOR_CORE, token=token(), ws_url=SUPERVISOR_WS,
-            output=str(OUTPUT_HTML), log=log))
+            output=str(OUTPUT_HTML), debug=debug, log=log))
     except (Exception, SystemExit) as e:  # noqa: BLE001
         # SystemExit too: find_template() exits if the template is missing,
         # and that surfaces here through the worker thread.
@@ -216,8 +244,12 @@ INDEX_HTML = r"""<!doctype html>
 <style>
   /* Home Assistant-flavoured palette: HA blue primary, HA's light/dark
      surfaces, so the add-on UI sits naturally inside the sidebar. */
+  /* Light is the default; dark applies either when the system asks for it
+     (auto, no explicit data-theme) or when the Theme dropdown is set to dark.
+     The dropdown writes data-theme on <html> so the whole config UI flips
+     live, matching what the generated page will use. */
   :root {
-    color-scheme: light dark;
+    color-scheme: light;
     --primary: #03a9f4;
     --bg: #f5f7fa;
     --card: #ffffff;
@@ -228,7 +260,8 @@ INDEX_HTML = r"""<!doctype html>
     --row: #eef1f5;
   }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
       --bg: #111417;
       --card: #1c1f24;
       --field: #22262d;
@@ -237,6 +270,26 @@ INDEX_HTML = r"""<!doctype html>
       --border: #3a3f47;
       --row: #262a31;
     }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #111417;
+    --card: #1c1f24;
+    --field: #22262d;
+    --text: #e1e3e6;
+    --muted: #9aa3ad;
+    --border: #3a3f47;
+    --row: #262a31;
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --field: #ffffff;
+    --text: #212121;
+    --muted: #5b6470;
+    --border: #d4d9e0;
+    --row: #eef1f5;
   }
   * { box-sizing: border-box; }
   body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -256,6 +309,11 @@ INDEX_HTML = r"""<!doctype html>
     outline: none; border-color: var(--primary);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 30%, transparent); }
   .grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  /* each cell stacks label over input; the label takes the slack so the
+     inputs line up along the bottom even when a long (e.g. French) label
+     wraps to two lines instead of shoving its field out of the row */
+  .grid > div { display: flex; flex-direction: column; }
+  .grid > div > label { flex: 1; }
   .row { display: grid; gap: .6rem; align-items: end;
          grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)) 2.5rem;
          padding: .7rem; border-radius: 10px;
@@ -278,6 +336,23 @@ INDEX_HTML = r"""<!doctype html>
     max-height: 320px; overflow: auto; }
   .links { margin-top: .75rem; display: none; gap: .75rem; flex-wrap: wrap; }
   .muted { color: var(--muted); font-size: .8rem; }
+
+  /* phones: give the fields room to breathe instead of cramming five
+     columns into a 360px screen. Two columns, a bit more padding, and the
+     remove button drops to its own full-width line so it can't be mistaken
+     for one of the fields. */
+  @media (max-width: 600px) {
+    body { padding: 1.25rem 1rem; }
+    fieldset { padding: 1rem .85rem; }
+    .grid { grid-template-columns: 1fr 1fr; gap: .9rem 1rem; }
+    .row { grid-template-columns: 1fr 1fr; gap: .7rem .9rem; padding: .9rem; }
+    .row .del { grid-column: 1 / -1; width: 100%; height: 2.1rem; }
+    .bar { gap: .5rem; }
+    .bar .btn { flex: 1 1 auto; }
+  }
+  @media (max-width: 380px) {
+    .grid, .row { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
@@ -310,6 +385,7 @@ INDEX_HTML = r"""<!doctype html>
           <option value="dot_comma">1.234,5</option>
           <option value="space_comma">1 234,5</option>
           <option value="plain_dot">1234.5</option>
+          <option value="plain_comma">1234,5</option>
         </select></div>
       <div><label data-i18n="l_theme">Theme</label>
         <select id="theme"><option value="auto" data-i18n="opt_auto">auto</option>
@@ -546,6 +622,15 @@ function applyLang(lang){
   });
 }
 
+// Mirror the chosen theme onto the config UI itself: "dark"/"light" pin it,
+// "auto" hands it back to the system preference (no data-theme attribute).
+function applyTheme(theme){
+  if(theme === "dark" || theme === "light")
+    document.documentElement.setAttribute("data-theme", theme);
+  else
+    document.documentElement.removeAttribute("data-theme");
+}
+
 function el(tag, attrs={}, ...kids){
   const e=document.createElement(tag);
   for(const k in attrs){ if(k==="value") e.value=attrs[k]; else e.setAttribute(k,attrs[k]); }
@@ -677,11 +762,16 @@ async function init(){
   if(cfg.number_format in NF_LEGACY) cfg.number_format=NF_LEGACY[cfg.number_format];
   ["house_name","period","language","number_format","theme","tz_offset","tone","anthropic_api_key"]
     .forEach(k=>{ if(cfg[k]!=null) $(k).value=cfg[k]; });
-  if(cfg.year) $("year").value=cfg.year;
-  if(cfg.month) $("month").value=cfg.month;
+  // only repopulate year/month from a real number -- a legacy config could
+  // still carry a stray "None"/"auto" string we don't want to show as a value
+  if(Number.isFinite(+cfg.year) && String(cfg.year).trim()!=="") $("year").value=cfg.year;
+  if(Number.isFinite(+cfg.month) && String(cfg.month).trim()!=="") $("month").value=cfg.month;
   // switch the whole UI to the saved language, and again whenever it changes
   applyLang($("language").value || "en");
   $("language").addEventListener("change", e => applyLang(e.target.value));
+  // same for the theme: reflect the dropdown into the config UI live
+  applyTheme($("theme").value || "auto");
+  $("theme").addEventListener("change", e => applyTheme(e.target.value));
   (cfg.statistics||[]).forEach(addStat);
   (cfg.counts||[]).forEach(addCount);
   if(!(cfg.statistics||[]).length) addStat();
