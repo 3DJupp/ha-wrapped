@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.5
+
+- Fixed: **Open wrapped gave `401: Unauthorized`.** It opened the Ingress
+  `view` URL in a new browser tab, but Home Assistant only accepts Ingress
+  paths as requests from inside its own iframe -- a top-level new tab is
+  rejected. Both Open and Download now fetch the file the way the rest of the
+  UI talks to the add-on (carrying the Ingress session) and hand the browser
+  a local blob, so opening in a new tab works.
+- Fixed: **Open / Download didn't reappear after reopening the add-on.** They
+  only showed right after generating; the page now detects an existing result
+  on load and shows them straight away.
+- The view/download responses send `Cache-Control: no-store` so re-opening
+  after a regenerate never serves a stale cached copy.
+
 ## 1.0.4
 
 - Entity picker now works in the HA companion app on Android and iOS. The

@@ -229,7 +229,16 @@ async def handle_view(request: web.Request) -> web.Response:
         return web.Response(
             text="No wrapped generated yet. Go back and hit Generate.",
             status=404)
-    return web.Response(text=OUTPUT_HTML.read_text(), content_type="text/html")
+    # The UI probes this route with HEAD on every page load just to learn
+    # whether a result exists -- answer that without reading the file off disk.
+    if request.method == "HEAD":
+        return web.Response(content_type="text/html",
+                            headers={"Cache-Control": "no-store"})
+    # no-store: a freshly regenerated wrapped must never be served stale from
+    # a browser/proxy cache when the user re-opens the same /view URL.
+    return web.Response(
+        text=OUTPUT_HTML.read_text(), content_type="text/html",
+        headers={"Cache-Control": "no-store"})
 
 
 async def handle_download(request: web.Request) -> web.Response:
@@ -238,7 +247,8 @@ async def handle_download(request: web.Request) -> web.Response:
     return web.Response(
         body=OUTPUT_HTML.read_bytes(), content_type="text/html",
         headers={"Content-Disposition":
-                 'attachment; filename="ha_wrapped.html"'})
+                 'attachment; filename="ha_wrapped.html"',
+                 "Cache-Control": "no-store"})
 
 
 # ----------------------------------------------------------------- app
@@ -482,8 +492,8 @@ INDEX_HTML = r"""<!doctype html>
     <span id="status" class="muted"></span>
   </div>
   <div class="links" id="links">
-    <a class="btn secondary" href="view" target="_blank" data-i18n="link_open">Open wrapped</a>
-    <a class="btn secondary" href="download" data-i18n="link_download">Download HTML</a>
+    <button class="btn secondary" id="lnk_view" onclick="openWrapped()" data-i18n="link_open">Open wrapped</button>
+    <button class="btn secondary" id="lnk_dl" onclick="downloadWrapped()" data-i18n="link_download">Download HTML</button>
   </div>
   <pre id="log"></pre>
 
@@ -864,6 +874,43 @@ async function saveConfig(){
   $("status").textContent = r.ok ? t("st_saved") : t("st_savefail");
 }
 
+function showLinks(){ $("links").style.display="flex"; }
+
+// Open / download the generated wrapped.
+//
+// We must NOT point a link (or a target=_blank tab) at the ingress "view"/
+// "download" URLs: Home Assistant returns 401 for ingress paths opened as a
+// top-level navigation in a new tab -- they are only valid as sub-requests
+// from inside the authenticated HA iframe. So we fetch the file the same way
+// the api/* calls already do (the request carries the ingress session), then
+// hand the browser a local blob: URL, which has no such guard.
+async function openWrapped(){
+  // Open the tab synchronously inside the click gesture so the popup blocker
+  // lets it through; fill it once the fetch resolves.
+  const w = window.open("", "_blank");
+  if(w){ try{ w.document.write("<!doctype html><title>HA Wrapped</title><p style='font:1rem system-ui;padding:2rem'>Loading…</p>"); }catch(e){} }
+  try{
+    const r = await fetch("view", {cache:"no-store"});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const url = URL.createObjectURL(await r.blob());
+    if(w) w.location = url;          // new tab: render the blob
+    else  location.assign(url);      // popup blocked: fall back to this frame
+  }catch(e){
+    if(w) w.close();
+    $("status").textContent = t("st_error");
+  }
+}
+
+async function downloadWrapped(){
+  try{
+    const r = await fetch("download", {cache:"no-store"});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const a = el("a", {href: URL.createObjectURL(await r.blob()),
+                       download: "ha_wrapped.html"});
+    document.body.append(a); a.click(); a.remove();
+  }catch(e){ $("status").textContent = t("st_error"); }
+}
+
 async function generate(){
   await saveConfig();
   const btn=$("genbtn"); btn.disabled=true; btn.textContent=t("st_generating");
@@ -872,10 +919,20 @@ async function generate(){
     const r=await fetch("api/generate",{method:"POST"});
     const j=await r.json();
     $("log").textContent=(j.log||[]).join("\n")+(j.error?("\n[FAIL] "+j.error):"");
-    if(j.ok){ $("status").textContent=t("st_done"); $("links").style.display="flex"; }
+    if(j.ok){ $("status").textContent=t("st_done"); showLinks(); }
     else $("status").textContent=t("st_failed");
   }catch(e){ $("status").textContent=t("st_error"); $("log").textContent=String(e); }
   btn.disabled=false; btn.textContent=t("btn_generate");
+}
+
+// If a wrapped was generated in an earlier session it's still on disk, so
+// reveal the links on load too -- otherwise the only way to open it would be
+// to regenerate. A HEAD probe avoids pulling the whole file just to check.
+async function checkExisting(){
+  try{
+    const r=await fetch("view",{method:"HEAD"});
+    if(r.ok) showLinks();
+  }catch(e){ /* nothing generated yet, or offline -- links stay hidden */ }
 }
 
 async function loadEntities(){
@@ -912,6 +969,7 @@ async function init(){
   if(!(cfg.counts||[]).length) addCount();
   applyLang($("language").value || "en");  // re-apply for the freshly added rows
   loadEntities();
+  checkExisting();
 }
 init();
 </script>
