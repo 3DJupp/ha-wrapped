@@ -377,6 +377,31 @@ INDEX_HTML = r"""<!doctype html>
   @media (max-width: 380px) {
     .grid, .row { grid-template-columns: 1fr; }
   }
+
+  /* custom entity combobox — replaces native datalist (unreliable in HA app) */
+  .combo { position: relative; }
+  .combo-list {
+    position: absolute; left: 0; top: 100%; z-index: 600;
+    /* entity_id is always the first (left) field, so a list wider than its
+       narrow mobile cell can spill to the right and stay readable without
+       running off-screen */
+    min-width: 240px; max-width: min(92vw, 420px); width: max-content;
+    background: var(--card); border: 1px solid var(--primary);
+    border-top: none; border-radius: 0 0 8px 8px;
+    max-height: 220px; overflow-y: auto; display: none;
+    box-shadow: 0 6px 18px rgba(0,0,0,.22);
+  }
+  .combo.open .combo-list { display: block; }
+  .combo-item {
+    padding: .38rem .6rem; cursor: pointer; font-size: .8rem;
+    line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+  }
+  .combo-item:last-child { border-bottom: none; }
+  .combo-item:hover, .combo-item.hi { background: color-mix(in srgb, var(--primary) 18%, transparent); }
+  .combo-sub { color: var(--muted); font-size: .72rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .combo-empty { padding: .38rem .6rem; font-size: .8rem; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -439,9 +464,6 @@ INDEX_HTML = r"""<!doctype html>
     <button class="add" onclick="addCount()" data-i18n="btn_addcount">+ Add count</button>
   </fieldset>
 
-  <datalist id="dl_stats"></datalist>
-  <datalist id="dl_entities"></datalist>
-
   <div class="bar">
     <button class="btn secondary" onclick="saveConfig()" data-i18n="btn_save">Save</button>
     <button class="btn" onclick="generate()" id="genbtn" data-i18n="btn_generate">Save &amp; Generate</button>
@@ -484,6 +506,8 @@ const I18N = {
     st_saved:"Saved ✓", st_savefail:"Save failed", st_working:"Working...",
     st_generating:"Generating...", st_done:"Done ✓",
     st_failed:"Failed", st_error:"Error",
+    pick_none:"No matching entities. Type the full ID.",
+    pick_loading:"Loading entities…",
   },
   de: {
     title:"HA Wrapped",
@@ -508,6 +532,8 @@ const I18N = {
     st_saved:"Gespeichert ✓", st_savefail:"Speichern fehlgeschlagen",
     st_working:"Arbeite...", st_generating:"Erstelle...", st_done:"Fertig ✓",
     st_failed:"Fehlgeschlagen", st_error:"Fehler",
+    pick_none:"Keine passende Entität. ID direkt eingeben.",
+    pick_loading:"Entitäten werden geladen…",
   },
   fr: {
     title:"HA Wrapped",
@@ -532,6 +558,8 @@ const I18N = {
     st_saved:"Enregistré ✓", st_savefail:"Échec de l'enregistrement",
     st_working:"En cours...", st_generating:"Génération...", st_done:"Terminé ✓",
     st_failed:"Échec", st_error:"Erreur",
+    pick_none:"Aucune entité correspondante. Saisissez l'ID complet.",
+    pick_loading:"Chargement des entités…",
   },
   es: {
     title:"HA Wrapped",
@@ -556,6 +584,8 @@ const I18N = {
     st_saved:"Guardado ✓", st_savefail:"Error al guardar",
     st_working:"Trabajando...", st_generating:"Generando...", st_done:"Listo ✓",
     st_failed:"Falló", st_error:"Error",
+    pick_none:"Sin coincidencias. Escribe el ID completo.",
+    pick_loading:"Cargando entidades…",
   },
   it: {
     title:"HA Wrapped",
@@ -580,6 +610,8 @@ const I18N = {
     st_saved:"Salvato ✓", st_savefail:"Salvataggio non riuscito",
     st_working:"In corso...", st_generating:"Generazione...", st_done:"Fatto ✓",
     st_failed:"Non riuscito", st_error:"Errore",
+    pick_none:"Nessuna corrispondenza. Digita l'ID completo.",
+    pick_loading:"Caricamento entità…",
   },
   nl: {
     title:"HA Wrapped",
@@ -604,6 +636,8 @@ const I18N = {
     st_saved:"Opgeslagen ✓", st_savefail:"Opslaan mislukt",
     st_working:"Bezig...", st_generating:"Genereren...", st_done:"Klaar ✓",
     st_failed:"Mislukt", st_error:"Fout",
+    pick_none:"Geen overeenkomende entiteit. Typ de volledige ID.",
+    pick_loading:"Entiteiten laden…",
   },
   pt: {
     title:"HA Wrapped",
@@ -628,6 +662,8 @@ const I18N = {
     st_saved:"Guardado ✓", st_savefail:"Falha ao guardar",
     st_working:"A trabalhar...", st_generating:"A gerar...", st_done:"Concluído ✓",
     st_failed:"Falhou", st_error:"Erro",
+    pick_none:"Nenhuma entidade correspondente. Escreva o ID completo.",
+    pick_loading:"A carregar entidades…",
   },
 };
 let LANG = "en";
@@ -661,10 +697,76 @@ function el(tag, attrs={}, ...kids){
   kids.forEach(c=>e.append(c)); return e;
 }
 
+// Entity lists loaded once from the API and shared by all combobox instances.
+let STAT_LIST = [];
+let ENT_LIST = [];
+
+// Custom combobox that works in all WebViews (replaces native datalist which
+// is unreliable in the HA companion app on mobile).
+function comboField(key, i18nKey, val, src) {
+  const d = el("div");
+  d.append(el("label", {"data-i18n": i18nKey}, t(i18nKey)));
+  const cw = el("div", {class: "combo"});
+  const inp = el("input", {class: "f", "data-k": key, value: val||"", autocomplete: "off"});
+  const dl = el("div", {class: "combo-list"});
+  let hiIdx = -1;
+
+  function choose(id) { inp.value = id; cw.classList.remove("open"); }
+
+  function populate(q) {
+    const all = src === "stats" ? STAT_LIST : ENT_LIST;
+    const ql = (q||"").trim().toLowerCase();
+    const hits = ql
+      ? all.filter(e => e.entity_id.toLowerCase().includes(ql) || (e.name||"").toLowerCase().includes(ql))
+      : all;
+    dl.innerHTML = "";
+    hiIdx = -1;
+    hits.slice(0, 120).forEach(e => {
+      const it = el("div", {class: "combo-item", "data-eid": e.entity_id});
+      it.textContent = e.entity_id;
+      if (e.name && e.name !== e.entity_id) {
+        const sub = el("div", {class: "combo-sub"});
+        sub.textContent = e.name;
+        it.append(sub);
+      }
+      // mousedown (not click) so it fires before the input blurs; preventDefault
+      // keeps focus in the field. WebViews synthesize this from a tap, so it
+      // works in the HA companion app where the native datalist did not.
+      it.addEventListener("mousedown", ev => { ev.preventDefault(); choose(e.entity_id); });
+      dl.append(it);
+    });
+    if (!hits.length) {
+      const empty = el("div", {class: "combo-empty"});
+      empty.textContent = all.length ? t("pick_none") : t("pick_loading");
+      dl.append(empty);
+    }
+    cw.classList.add("open");  // always open on interaction, even when empty,
+                                // so the picker never looks dead
+  }
+
+  inp.addEventListener("focus",  () => populate(inp.value));
+  inp.addEventListener("input",  () => populate(inp.value));
+  inp.addEventListener("blur",   () => setTimeout(() => cw.classList.remove("open"), 250));
+  inp.addEventListener("keydown", ev => {
+    const items = [...dl.querySelectorAll(".combo-item")];
+    if (!items.length) return;
+    if (ev.key === "ArrowDown")  { ev.preventDefault(); hiIdx = Math.min(hiIdx+1, items.length-1); }
+    else if (ev.key === "ArrowUp") { ev.preventDefault(); hiIdx = Math.max(hiIdx-1, -1); }
+    else if (ev.key === "Enter" && hiIdx >= 0) { ev.preventDefault(); choose(items[hiIdx].dataset.eid); return; }
+    else if (ev.key === "Escape") { cw.classList.remove("open"); return; }
+    items.forEach((it, i) => it.classList.toggle("hi", i === hiIdx));
+    if (hiIdx >= 0) items[hiIdx].scrollIntoView({block:"nearest"});
+  });
+
+  cw.append(inp, dl);
+  d.append(cw);
+  return d;
+}
+
 function statRow(s={}){
   const wrap=el("div",{class:"row"});
   wrap.append(
-    field("entity_id","col_entity", s.entity_id||"", "dl_stats"),
+    comboField("entity_id","col_entity", s.entity_id||"", "stats"),
     field("label","col_label", s.label||""),
     selectField("aggregate", GEN, s.aggregate||"sum"),
     field("unit","col_unit", s.unit||""),
@@ -679,7 +781,7 @@ function countRow(c={}){
   const wrap=el("div",{class:"row"});
   const eid = Array.isArray(c.entity_id) ? c.entity_id.join(", ") : (c.entity_id||"");
   wrap.append(
-    field("entity_id","col_entities", eid, "dl_entities"),
+    comboField("entity_id","col_entities", eid, "entities"),
     field("to_state","col_tostate", c.to_state||"on"),
     field("label","col_label", c.label||""),
     field("unit","col_unit", c.unit||""),
@@ -770,13 +872,9 @@ async function loadEntities(){
       fetch("api/statistics").then(r=>r.json()),
       fetch("api/entities").then(r=>r.json()),
     ]);
-    if(Array.isArray(stats)) fill("dl_stats", stats);
-    if(Array.isArray(ents)) fill("dl_entities", ents);
+    if(Array.isArray(stats)) STAT_LIST = stats;
+    if(Array.isArray(ents))  ENT_LIST  = ents;
   }catch(e){ /* pickers are a nicety; typing still works */ }
-}
-function fill(listId, items){
-  const dl=$(listId); dl.innerHTML="";
-  items.forEach(i=>{ const o=el("option",{value:i.entity_id}); o.label=i.name||""; dl.append(o); });
 }
 
 async function init(){

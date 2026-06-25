@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.4
+
+- Entity picker now works in the HA companion app on Android and iOS. The
+  native browser datalist (unreliable inside the app's WebView) is replaced
+  by a custom searchable dropdown: tap the field to see all entities, type to
+  filter by ID or friendly name, tap an entry to select it. Keyboard
+  navigation (arrows, Enter, Escape) works on desktop too.
+- Fixed a crash when a statistics or counts entry was saved without a label
+  (the engine now falls back to the entity ID instead of raising KeyError).
+
 ## 1.0.3
 
 - Fixed a crash when saving the config (`module 'wrapped' has no attribute
