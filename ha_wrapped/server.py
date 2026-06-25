@@ -381,7 +381,11 @@ INDEX_HTML = r"""<!doctype html>
   /* custom entity combobox — replaces native datalist (unreliable in HA app) */
   .combo { position: relative; }
   .combo-list {
-    position: absolute; left: 0; right: 0; top: 100%; z-index: 600;
+    position: absolute; left: 0; top: 100%; z-index: 600;
+    /* entity_id is always the first (left) field, so a list wider than its
+       narrow mobile cell can spill to the right and stay readable without
+       running off-screen */
+    min-width: 240px; max-width: min(92vw, 420px); width: max-content;
     background: var(--card); border: 1px solid var(--primary);
     border-top: none; border-radius: 0 0 8px 8px;
     max-height: 220px; overflow-y: auto; display: none;
@@ -395,7 +399,9 @@ INDEX_HTML = r"""<!doctype html>
   }
   .combo-item:last-child { border-bottom: none; }
   .combo-item:hover, .combo-item.hi { background: color-mix(in srgb, var(--primary) 18%, transparent); }
-  .combo-sub { color: var(--muted); font-size: .72rem; }
+  .combo-sub { color: var(--muted); font-size: .72rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .combo-empty { padding: .38rem .6rem; font-size: .8rem; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -500,6 +506,8 @@ const I18N = {
     st_saved:"Saved ✓", st_savefail:"Save failed", st_working:"Working...",
     st_generating:"Generating...", st_done:"Done ✓",
     st_failed:"Failed", st_error:"Error",
+    pick_none:"No matching entities. Type the full ID.",
+    pick_loading:"Loading entities…",
   },
   de: {
     title:"HA Wrapped",
@@ -524,6 +532,8 @@ const I18N = {
     st_saved:"Gespeichert ✓", st_savefail:"Speichern fehlgeschlagen",
     st_working:"Arbeite...", st_generating:"Erstelle...", st_done:"Fertig ✓",
     st_failed:"Fehlgeschlagen", st_error:"Fehler",
+    pick_none:"Keine passende Entität. ID direkt eingeben.",
+    pick_loading:"Entitäten werden geladen…",
   },
   fr: {
     title:"HA Wrapped",
@@ -548,6 +558,8 @@ const I18N = {
     st_saved:"Enregistré ✓", st_savefail:"Échec de l'enregistrement",
     st_working:"En cours...", st_generating:"Génération...", st_done:"Terminé ✓",
     st_failed:"Échec", st_error:"Erreur",
+    pick_none:"Aucune entité correspondante. Saisissez l'ID complet.",
+    pick_loading:"Chargement des entités…",
   },
   es: {
     title:"HA Wrapped",
@@ -572,6 +584,8 @@ const I18N = {
     st_saved:"Guardado ✓", st_savefail:"Error al guardar",
     st_working:"Trabajando...", st_generating:"Generando...", st_done:"Listo ✓",
     st_failed:"Falló", st_error:"Error",
+    pick_none:"Sin coincidencias. Escribe el ID completo.",
+    pick_loading:"Cargando entidades…",
   },
   it: {
     title:"HA Wrapped",
@@ -596,6 +610,8 @@ const I18N = {
     st_saved:"Salvato ✓", st_savefail:"Salvataggio non riuscito",
     st_working:"In corso...", st_generating:"Generazione...", st_done:"Fatto ✓",
     st_failed:"Non riuscito", st_error:"Errore",
+    pick_none:"Nessuna corrispondenza. Digita l'ID completo.",
+    pick_loading:"Caricamento entità…",
   },
   nl: {
     title:"HA Wrapped",
@@ -620,6 +636,8 @@ const I18N = {
     st_saved:"Opgeslagen ✓", st_savefail:"Opslaan mislukt",
     st_working:"Bezig...", st_generating:"Genereren...", st_done:"Klaar ✓",
     st_failed:"Mislukt", st_error:"Fout",
+    pick_none:"Geen overeenkomende entiteit. Typ de volledige ID.",
+    pick_loading:"Entiteiten laden…",
   },
   pt: {
     title:"HA Wrapped",
@@ -644,6 +662,8 @@ const I18N = {
     st_saved:"Guardado ✓", st_savefail:"Falha ao guardar",
     st_working:"A trabalhar...", st_generating:"A gerar...", st_done:"Concluído ✓",
     st_failed:"Falhou", st_error:"Erro",
+    pick_none:"Nenhuma entidade correspondente. Escreva o ID completo.",
+    pick_loading:"A carregar entidades…",
   },
 };
 let LANG = "en";
@@ -691,30 +711,37 @@ function comboField(key, i18nKey, val, src) {
   const dl = el("div", {class: "combo-list"});
   let hiIdx = -1;
 
+  function choose(id) { inp.value = id; cw.classList.remove("open"); }
+
   function populate(q) {
     const all = src === "stats" ? STAT_LIST : ENT_LIST;
-    const ql = (q||"").toLowerCase();
+    const ql = (q||"").trim().toLowerCase();
     const hits = ql
       ? all.filter(e => e.entity_id.toLowerCase().includes(ql) || (e.name||"").toLowerCase().includes(ql))
       : all;
     dl.innerHTML = "";
     hiIdx = -1;
     hits.slice(0, 120).forEach(e => {
-      const it = el("div", {class: "combo-item"});
+      const it = el("div", {class: "combo-item", "data-eid": e.entity_id});
       it.textContent = e.entity_id;
       if (e.name && e.name !== e.entity_id) {
         const sub = el("div", {class: "combo-sub"});
         sub.textContent = e.name;
         it.append(sub);
       }
-      it.addEventListener("mousedown", ev => {
-        ev.preventDefault();
-        inp.value = e.entity_id;
-        cw.classList.remove("open");
-      });
+      // mousedown (not click) so it fires before the input blurs; preventDefault
+      // keeps focus in the field. WebViews synthesize this from a tap, so it
+      // works in the HA companion app where the native datalist did not.
+      it.addEventListener("mousedown", ev => { ev.preventDefault(); choose(e.entity_id); });
       dl.append(it);
     });
-    cw.classList.toggle("open", dl.children.length > 0);
+    if (!hits.length) {
+      const empty = el("div", {class: "combo-empty"});
+      empty.textContent = all.length ? t("pick_none") : t("pick_loading");
+      dl.append(empty);
+    }
+    cw.classList.add("open");  // always open on interaction, even when empty,
+                                // so the picker never looks dead
   }
 
   inp.addEventListener("focus",  () => populate(inp.value));
@@ -725,7 +752,7 @@ function comboField(key, i18nKey, val, src) {
     if (!items.length) return;
     if (ev.key === "ArrowDown")  { ev.preventDefault(); hiIdx = Math.min(hiIdx+1, items.length-1); }
     else if (ev.key === "ArrowUp") { ev.preventDefault(); hiIdx = Math.max(hiIdx-1, -1); }
-    else if (ev.key === "Enter" && hiIdx >= 0) { ev.preventDefault(); items[hiIdx].dispatchEvent(new MouseEvent("mousedown")); return; }
+    else if (ev.key === "Enter" && hiIdx >= 0) { ev.preventDefault(); choose(items[hiIdx].dataset.eid); return; }
     else if (ev.key === "Escape") { cw.classList.remove("open"); return; }
     items.forEach((it, i) => it.classList.toggle("hi", i === hiIdx));
     if (hiIdx >= 0) items[hiIdx].scrollIntoView({block:"nearest"});
