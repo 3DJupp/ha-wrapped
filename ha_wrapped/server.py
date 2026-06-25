@@ -15,6 +15,7 @@ No long-lived token: Core is reached via http(ws)://supervisor/core using the
 add-on's own SUPERVISOR_TOKEN.
 """
 import asyncio
+import datetime as _dt
 import json
 import os
 from pathlib import Path
@@ -189,6 +190,17 @@ async def handle_generate(request: web.Request) -> web.Response:
     debug = log_level() in ("debug", "trace")
     if debug:
         log(f"  [debug] log_level={log_level()}: dumping raw statistic rows")
+
+    # Ensure year/month are concrete integers before handing off to the engine.
+    # The engine's compute_period() crashes on None values in older builds; we
+    # default here so the add-on is resilient regardless of which engine
+    # version is installed in the container.
+    _now = _dt.datetime.now()
+    _last_mo = (_now.replace(day=1) - _dt.timedelta(days=1))
+    if not _opt_int(cfg.get("year")):
+        cfg["year"] = _last_mo.year if cfg.get("period") == "monthly" else _now.year
+    if cfg.get("period") == "monthly" and not _opt_int(cfg.get("month")):
+        cfg["month"] = _last_mo.month
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     loop = asyncio.get_running_loop()
