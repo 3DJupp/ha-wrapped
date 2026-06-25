@@ -3,7 +3,7 @@
 # in the add-on's own Ingress UI (with entity pickers), so the native schema
 # here stays intentionally small.
 name: HA Wrapped
-version: "1.0.3"
+version: "1.0.4"
 slug: ha_wrapped
 description: A Spotify-Wrapped-style year (or month) review for your Home Assistant.
 url: https://github.com/3DJupp/ha-wrapped/tree/main/ha_wrapped

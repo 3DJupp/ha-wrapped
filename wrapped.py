@@ -530,16 +530,17 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
             scale = s.get("scale") or 1.0
             total *= scale
             series = [v * scale for v in series]
+            label = s.get("label") or s.get("entity_id", "?")
             stats_out.append({
                 "id": s["entity_id"],
-                "label": s["label"],
+                "label": label,
                 "unit": s.get("unit", ""),
                 "value": total,
                 "display_value": fmt(total, s.get("decimals", 0), nfmt),
                 "series": series,
                 "footnote": s.get("footnote", ""),
             })
-            log(f"  {s['label']}: {total:.1f} {s.get('unit','')}")
+            log(f"  {label}: {total:.1f} {s.get('unit','')}")
 
     # --- state-change counts
     for c in cfg.get("counts", []):
@@ -561,16 +562,17 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
                               else "no events"})
         scale = c.get("scale") or 1.0
         value = n * scale
+        label = c.get("label") or ids_label
         stats_out.append({
             "id": ids_label,
-            "label": c["label"],
+            "label": label,
             "unit": c.get("unit", "x"),
             "value": value,
             "display_value": fmt(value, c.get("decimals", 0), nfmt),
             "series": [v * scale for v in series],
             "footnote": c.get("footnote", ""),
         })
-        log(f"  {c['label']}: {n} events")
+        log(f"  {label}: {n} events")
 
     if not stats_out:
         raise ValueError("No stats collected, nothing to render.")
