@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.8
+
+- **Updates now actually ship the latest engine.** The image installs the
+  engine (`wrapped.py` + `template.html`) from the `main` branch, but Docker
+  cached that layer, so a version bump could advertise a new version while
+  still running stale engine code (e.g. the 1.0.7 wording fix not taking
+  effect). A per-release cache-bust token now forces the engine to be
+  re-pulled in lock-step with the add-on version.
+
 ## 1.0.7
 
 - **Monthly recaps now read like monthly recaps.** The intro and outro copy
