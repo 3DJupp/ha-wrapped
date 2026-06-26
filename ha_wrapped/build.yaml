@@ -8,5 +8,9 @@ build_from:
   i386: ghcr.io/home-assistant/i386-base-python:3.12-alpine3.19
 # HA_WRAPPED_REF pins which git ref of the engine (wrapped.py + template.html)
 # gets installed. Defaults to main; override per build if needed.
+# ENGINE_CACHE_BUST must match the config.yaml version on every release -- it
+# forces Docker to re-pull the engine from the (moving) ref above instead of
+# serving a stale cached layer. Bump it together with config.yaml `version:`.
 args:
   HA_WRAPPED_REF: main
+  ENGINE_CACHE_BUST: "1.0.8"

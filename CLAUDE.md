@@ -111,6 +111,12 @@ dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
   No minor/major jumps unless the owner explicitly asks. The Home Assistant
   store reads `main` and compares this version against what's installed, so
   the bump must reach `main` for an update to show.
+- **Set `ENGINE_CACHE_BUST` in `ha_wrapped/build.yaml` to the same version
+  on every release.** The image installs the engine from the moving `main`
+  branch, so without this Docker reuses the cached `pip install` layer and an
+  update ships stale `wrapped.py`/`template.html` while advertising the new
+  version. The bust token must change for the engine layer to rebuild — keep
+  it in lock-step with `config.yaml` `version:`.
 
 ### Look & voice (owner preferences)
 
