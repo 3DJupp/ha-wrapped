@@ -46,11 +46,47 @@ and open the UI (sidebar **Wrapped**, or the add-on's **Open Web UI**).
    loads, doorbell rings…). Comma-separate several entities to sum them into
    one stat. `to_state` is the state whose arrivals are counted (`on`,
    `closing`, …).
-4. **Save & Generate.** When it finishes, **Open wrapped ↗** shows the page;
+4. **Save & Generate.** When it finishes, **Open wrapped** shows the page
+   full-screen right inside the add-on panel (use **← Back** to return);
    **Download HTML** saves the self-contained file.
 
 Only aggregated numbers ever leave your network, and only if you set an
 Anthropic API key. No entity history is uploaded anywhere.
+
+## Embed it in a dashboard
+
+Every generated wrapped is also written to your HA config's `www/` folder, so
+it is served by Home Assistant at:
+
+- `/local/ha-wrapped/ha_wrapped.html` — the latest generation (manual or auto)
+- `/local/ha-wrapped/monthly.html` — the latest auto-generated month
+- `/local/ha-wrapped/yearly.html` — the latest auto-generated year
+
+To show it on a dashboard, add a **Webpage card** pointing at one of those
+URLs, for example:
+
+```yaml
+type: iframe
+url: /local/ha-wrapped/ha_wrapped.html
+aspect_ratio: 150%
+```
+
+(The file is also mirrored to `/share/ha-wrapped/` for Samba/SSH.)
+
+## Automatic generation
+
+Set **Auto-generate** (General section) to have the add-on render the page on
+its own — no need to open it each time:
+
+- **monthly** — at the start of each month, renders the month that just ended.
+- **yearly** — on 1 January, renders the year that just ended.
+- **monthly + yearly** — both.
+- **off** (default) — only generate when you press Generate.
+
+The scheduler uses your saved config (entities, language, tone, API key…) and
+the **Timezone offset** to decide when a month/year has ended. Combined with a
+Webpage card pointing at `/local/ha-wrapped/monthly.html` or `yearly.html`,
+your dashboard updates itself.
 
 ## Configuration tab
 
