@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.7
+
+- **Monthly recaps now read like monthly recaps.** The intro and outro copy
+  ("What your home got up to this year", "See you next year") was hardwired to
+  the yearly wording. Monthly reports now say "this month" / "next month" in
+  every language, and the AI copy is told whether it's writing a monthly or a
+  yearly recap so its forward-looking line points at the right horizon.
+
 ## 1.0.6
 
 - **Open wrapped now opens full-screen inside the add-on panel** (with a
