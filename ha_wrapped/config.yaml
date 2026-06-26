@@ -3,7 +3,7 @@
 # in the add-on's own Ingress UI (with entity pickers), so the native schema
 # here stays intentionally small.
 name: HA Wrapped
-version: "1.0.5"
+version: "1.0.6"
 slug: ha_wrapped
 description: A Spotify-Wrapped-style year (or month) review for your Home Assistant.
 url: https://github.com/3DJupp/ha-wrapped/tree/main/ha_wrapped
@@ -28,9 +28,12 @@ panel_title: Wrapped
 homeassistant_api: true
 
 # The rendered HTML + PNG are written to /data (persistent, served via Ingress)
-# and copied to /share/ha-wrapped/ so they are reachable over Samba/SSH too.
+# and copied to /share/ha-wrapped/ (Samba/SSH) and to the HA config's www/
+# folder, so the result is reachable at /local/ha-wrapped/ and can be embedded
+# in a dashboard with a Webpage card.
 map:
   - share:rw
+  - homeassistant_config:rw
 
 options:
   log_level: info

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.6
+
+- **Open wrapped now opens full-screen inside the add-on panel** (with a
+  ← Back button) instead of a new browser tab. New tabs hit Home Assistant's
+  Ingress 401 and showed an ugly `blob:` URL; this works everywhere, the HA
+  app included.
+- **Embed the result in a dashboard.** The wrapped is now also written to the
+  HA config's `www/` folder, so it's reachable at
+  `/local/ha-wrapped/ha_wrapped.html` and can be dropped into a dashboard with
+  a **Webpage card**. Auto-generated runs also publish stable
+  `/local/ha-wrapped/monthly.html` and `/local/ha-wrapped/yearly.html`.
+- **Automatic generation.** New **Auto-generate** option (off / monthly /
+  yearly / both). A built-in scheduler renders the most recently completed
+  month at the start of each month, and the previous year on 1 January, using
+  your saved config. Off by default.
+
 ## 1.0.5
 
 - Fixed: **Open wrapped gave `401: Unauthorized`.** It opened the Ingress

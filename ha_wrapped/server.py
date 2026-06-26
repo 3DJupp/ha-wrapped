@@ -30,6 +30,7 @@ CONFIG_PATH = DATA / "config.yaml"
 OUTPUT_DIR = DATA / "output"
 OUTPUT_HTML = OUTPUT_DIR / "ha_wrapped.html"
 SHARE_DIR = Path("/share/ha-wrapped")
+AUTO_STATE = DATA / "auto_state.json"
 PORT = int(os.environ.get("INGRESS_PORT", "8099"))
 
 SUPERVISOR_CORE = "http://supervisor/core"
@@ -46,6 +47,7 @@ DEFAULT_CONFIG = {
     "tone": "dry, witty, deadpan",
     "tz_offset": "+01:00",
     "anthropic_api_key": "",
+    "auto_generate": "off",
     "statistics": [],
     "counts": [],
 }
@@ -101,6 +103,45 @@ def load_config() -> dict:
     if CONFIG_PATH.exists():
         cfg = yaml.safe_load(CONFIG_PATH.read_text()) or {}
     return {**DEFAULT_CONFIG, **cfg}
+
+
+def config_www_dir() -> Path | None:
+    """Where to drop a copy reachable as /local/ha-wrapped/... in HA.
+
+    The add-on maps the HA config dir read-write; depending on the Supervisor
+    version it mounts at /homeassistant (current) or /config (legacy). Files
+    under <config>/www are served by HA at /local, so a wrapped written there
+    can be embedded in a dashboard with a Webpage card. Returns None when the
+    mapping isn't present (older config, or the map line not granted yet).
+    """
+    for base in ("/homeassistant", "/config"):
+        if Path(base).is_dir():
+            return Path(base) / "www" / "ha-wrapped"
+    return None
+
+
+def publish(src: Path, names) -> list[str]:
+    """Copy a generated HTML to /share and /local under each given name.
+
+    Best-effort: a failure to reach one target (e.g. /local not mapped) is
+    logged and skipped, never fatal. Returns the human-readable destinations
+    that succeeded, so the UI can show where the file landed.
+    """
+    html = src.read_text()
+    done: list[str] = []
+    targets = [(SHARE_DIR, "/share/ha-wrapped")]
+    www = config_www_dir()
+    if www:
+        targets.append((www, "/local/ha-wrapped"))
+    for d, label in targets:
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            for n in names:
+                (d / n).write_text(html)
+            done.append(label)
+        except Exception as e:  # noqa: BLE001
+            print(f"  (could not copy to {label}: {e})", flush=True)
+    return done
 
 
 def save_config(cfg: dict) -> None:
@@ -214,12 +255,10 @@ async def handle_generate(request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "error": str(e) or repr(e), "log": logs}, status=400)
 
-    # mirror to /share for Samba/SSH access (best-effort)
-    try:
-        SHARE_DIR.mkdir(parents=True, exist_ok=True)
-        (SHARE_DIR / "ha_wrapped.html").write_text(OUTPUT_HTML.read_text())
-    except Exception as e:  # noqa: BLE001
-        log(f"  (could not copy to /share: {e})")
+    # mirror to /share (Samba/SSH) and /local (dashboard embedding), best-effort
+    dests = publish(OUTPUT_HTML, ["ha_wrapped.html"])
+    for d in dests:
+        log(f"  copied to {d}/ha_wrapped.html")
 
     return web.json_response({"ok": True, "result": result, "log": logs})
 
@@ -251,14 +290,143 @@ async def handle_download(request: web.Request) -> web.Response:
                  "Cache-Control": "no-store"})
 
 
+# ------------------------------------------------------ auto-generation
+
+
+def _tz(cfg: dict) -> _dt.timezone:
+    """Parse the configured tz_offset ("+01:00") into a tzinfo.
+
+    Used so the month/year boundaries the scheduler reacts to match the user's
+    local calendar rather than the container's clock (usually UTC).
+    """
+    off = (cfg.get("tz_offset") or "+00:00").strip()
+    try:
+        sign = -1 if off.startswith("-") else 1
+        hh, mm = off.lstrip("+-").split(":")
+        return _dt.timezone(sign * _dt.timedelta(hours=int(hh), minutes=int(mm)))
+    except Exception:  # noqa: BLE001
+        return _dt.timezone.utc
+
+
+def _auto_state() -> dict:
+    if AUTO_STATE.exists():
+        try:
+            return json.loads(AUTO_STATE.read_text())
+        except Exception:  # noqa: BLE001
+            return {}
+    return {}
+
+
+def _save_auto_state(s: dict) -> None:
+    try:
+        AUTO_STATE.write_text(json.dumps(s))
+    except Exception as e:  # noqa: BLE001
+        print(f"[auto] could not save state: {e}", flush=True)
+
+
+def _run_one(base_cfg: dict, *, period: str, year: int, month: int | None) -> None:
+    """Generate one period and publish it. Runs in a worker thread."""
+    cfg = dict(base_cfg)
+    cfg["period"] = period
+    cfg["year"] = year
+    if month:
+        cfg["month"] = month
+    if period == "monthly":
+        fname = f"ha_wrapped_{year}-{month:02d}.html"
+        names = ["ha_wrapped.html", "monthly.html", fname]
+        tag = f"{year}-{month:02d}"
+    else:
+        fname = f"ha_wrapped_{year}.html"
+        names = ["ha_wrapped.html", "yearly.html", fname]
+        tag = str(year)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    out = OUTPUT_DIR / fname
+
+    def log(m):
+        print(f"[auto] {m}", flush=True)
+
+    log(f"generating {period} {tag}")
+    wrapped.collect_and_render(
+        cfg, ha_url=SUPERVISOR_CORE, token=token(), ws_url=SUPERVISOR_WS,
+        output=str(out), debug=False, log=log)
+    # make the freshly generated period the default the UI/sidebar opens, and
+    # mirror to /share + /local (latest, per-type and period-named copies)
+    OUTPUT_HTML.write_text(out.read_text())
+    dests = publish(out, names)
+    log(f"done {tag} -> " + ", ".join(d + "/" + n for d in dests for n in names)
+        if dests else f"done {tag} (local copy only)")
+
+
+def run_auto_due() -> None:
+    """If a completed period hasn't been auto-generated yet, generate it.
+
+    Keeps the most recently completed month/year (per the auto_generate mode)
+    rendered. Records what it did in AUTO_STATE so it runs once per period, not
+    once per check. Blocking -- call from an executor, never the event loop.
+    """
+    cfg = load_config()
+    mode = (cfg.get("auto_generate") or "off").lower()
+    if mode in ("off", "", "none", "no"):
+        return
+    do_month = mode in ("monthly", "both")
+    do_year = mode in ("yearly", "both")
+    now = _dt.datetime.now(_tz(cfg))
+    state = _auto_state()
+
+    if do_month:
+        prev_end = now.replace(day=1) - _dt.timedelta(days=1)
+        key = f"m:{prev_end.year}-{prev_end.month:02d}"
+        if key not in state:
+            try:
+                _run_one(cfg, period="monthly",
+                         year=prev_end.year, month=prev_end.month)
+                state[key] = now.isoformat(timespec="seconds")
+                _save_auto_state(state)
+            except Exception as e:  # noqa: BLE001
+                print(f"[auto] monthly failed: {e}", flush=True)
+
+    if do_year:
+        py = now.year - 1
+        key = f"y:{py}"
+        if key not in state:
+            try:
+                _run_one(cfg, period="yearly", year=py, month=None)
+                state[key] = now.isoformat(timespec="seconds")
+                _save_auto_state(state)
+            except Exception as e:  # noqa: BLE001
+                print(f"[auto] yearly failed: {e}", flush=True)
+
+
+async def scheduler() -> None:
+    """Hourly check that the latest completed period has been auto-generated."""
+    await asyncio.sleep(15)  # let the server settle before the first run
+    loop = asyncio.get_running_loop()
+    while True:
+        try:
+            await loop.run_in_executor(None, run_auto_due)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            print(f"[auto] scheduler error: {e}", flush=True)
+        await asyncio.sleep(3600)
+
+
 # ----------------------------------------------------------------- app
 
 
 async def on_startup(app: web.Application):
     app["http"] = ClientSession(timeout=ClientTimeout(total=60))
+    app["sched"] = asyncio.create_task(scheduler())
 
 
 async def on_cleanup(app: web.Application):
+    task = app.get("sched")
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     await app["http"].close()
 
 
@@ -424,6 +592,16 @@ INDEX_HTML = r"""<!doctype html>
   .combo-sub { color: var(--muted); font-size: .72rem;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .combo-empty { padding: .38rem .6rem; font-size: .8rem; color: var(--muted); }
+
+  /* full-screen viewer: the generated wrapped is shown right here in the
+     add-on panel (in an isolated iframe) instead of a new browser tab --
+     Home Assistant rejects Ingress URLs opened as a top-level new tab. */
+  .viewer { position: fixed; inset: 0; z-index: 1000; background: var(--bg);
+    display: none; flex-direction: column; }
+  .viewer.open { display: flex; }
+  .viewer-bar { flex: 0 0 auto; padding: .5rem .75rem;
+    border-bottom: 1px solid var(--border); background: var(--card); }
+  .viewer iframe { flex: 1 1 auto; width: 100%; border: 0; }
 </style>
 </head>
 <body>
@@ -463,6 +641,13 @@ INDEX_HTML = r"""<!doctype html>
           <option value="dark" data-i18n="opt_dark">dark</option>
           <option value="light" data-i18n="opt_light">light</option></select></div>
       <div><label data-i18n="l_tz">Timezone offset</label><input id="tz_offset" placeholder="+01:00"></div>
+      <div><label data-i18n="l_auto">Auto-generate</label>
+        <select id="auto_generate">
+          <option value="off" data-i18n="opt_off">off</option>
+          <option value="monthly" data-i18n="opt_monthly">monthly</option>
+          <option value="yearly" data-i18n="opt_yearly">yearly</option>
+          <option value="both" data-i18n="opt_both">monthly + yearly</option>
+        </select></div>
     </div>
     <div style="margin-top:.75rem"><label data-i18n="l_tone">Tone (AI copy personality)</label><input id="tone"></div>
     <div style="margin-top:.75rem"><label data-i18n="l_apikey">Anthropic API key (optional, enables witty copy)</label>
@@ -497,6 +682,13 @@ INDEX_HTML = r"""<!doctype html>
   </div>
   <pre id="log"></pre>
 
+  <div id="viewer" class="viewer">
+    <div class="viewer-bar">
+      <button class="btn secondary" onclick="closeWrapped()" data-i18n="link_back">← Back</button>
+    </div>
+    <iframe id="viewer-frame" title="HA Wrapped"></iframe>
+  </div>
+
 <script>
 const $ = id => document.getElementById(id);
 const GEN = ["sum","mean","max","delta"];
@@ -521,7 +713,8 @@ const I18N = {
     help_counts:"State-change counts via the history API (laundry loads, doorbell rings). Comma-separate several entities to sum them as one.",
     btn_addstat:"+ Add statistic", btn_addcount:"+ Add count",
     btn_save:"Save", btn_generate:"Save & Generate",
-    link_open:"Open wrapped", link_download:"Download HTML",
+    link_open:"Open wrapped", link_download:"Download HTML", link_back:"← Back",
+    l_auto:"Auto-generate", opt_off:"off", opt_both:"monthly + yearly",
     col_entity:"entity", col_entities:"entity(ies)", col_label:"label",
     col_aggregate:"aggregate", col_unit:"unit", col_scale:"scale",
     col_decimals:"decimals", col_footnote:"footnote", col_tostate:"to_state",
@@ -547,7 +740,8 @@ const I18N = {
     help_counts:"Zustandswechsel über die Verlaufs-API (Waschgänge, Türklingeln). Mehrere Entitäten mit Komma trennen, um sie zusammenzuzählen.",
     btn_addstat:"+ Statistik hinzufügen", btn_addcount:"+ Zählung hinzufügen",
     btn_save:"Speichern", btn_generate:"Speichern & Erstellen",
-    link_open:"Wrapped öffnen", link_download:"HTML herunterladen",
+    link_open:"Wrapped öffnen", link_download:"HTML herunterladen", link_back:"← Zurück",
+    l_auto:"Automatisch erstellen", opt_off:"aus", opt_both:"monatlich + jährlich",
     col_entity:"Entität", col_entities:"Entität(en)", col_label:"Bezeichnung",
     col_aggregate:"Aggregat", col_unit:"Einheit", col_scale:"Faktor",
     col_decimals:"Dezimalstellen", col_footnote:"Fußnote", col_tostate:"Zielzustand",
@@ -573,7 +767,8 @@ const I18N = {
     help_counts:"Comptages de changements d'état via l'API d'historique (machines à laver, sonnettes). Séparez plusieurs entités par une virgule pour les additionner.",
     btn_addstat:"+ Ajouter une statistique", btn_addcount:"+ Ajouter un comptage",
     btn_save:"Enregistrer", btn_generate:"Enregistrer et générer",
-    link_open:"Ouvrir le wrapped", link_download:"Télécharger le HTML",
+    link_open:"Ouvrir le wrapped", link_download:"Télécharger le HTML", link_back:"← Retour",
+    l_auto:"Génération auto", opt_off:"désactivé", opt_both:"mensuel + annuel",
     col_entity:"entité", col_entities:"entité(s)", col_label:"libellé",
     col_aggregate:"agrégat", col_unit:"unité", col_scale:"facteur",
     col_decimals:"décimales", col_footnote:"note", col_tostate:"état cible",
@@ -599,7 +794,8 @@ const I18N = {
     help_counts:"Recuentos de cambios de estado mediante la API de historial (lavados, timbres). Separa varias entidades con comas para sumarlas como una.",
     btn_addstat:"+ Añadir estadística", btn_addcount:"+ Añadir recuento",
     btn_save:"Guardar", btn_generate:"Guardar y generar",
-    link_open:"Abrir el wrapped", link_download:"Descargar HTML",
+    link_open:"Abrir el wrapped", link_download:"Descargar HTML", link_back:"← Atrás",
+    l_auto:"Generación automática", opt_off:"desactivado", opt_both:"mensual + anual",
     col_entity:"entidad", col_entities:"entidad(es)", col_label:"etiqueta",
     col_aggregate:"agregado", col_unit:"unidad", col_scale:"factor",
     col_decimals:"decimales", col_footnote:"nota", col_tostate:"estado destino",
@@ -625,7 +821,8 @@ const I18N = {
     help_counts:"Conteggi dei cambi di stato tramite l'API della cronologia (lavaggi, campanelli). Separa più entità con la virgola per sommarle come una.",
     btn_addstat:"+ Aggiungi statistica", btn_addcount:"+ Aggiungi conteggio",
     btn_save:"Salva", btn_generate:"Salva e genera",
-    link_open:"Apri il wrapped", link_download:"Scarica HTML",
+    link_open:"Apri il wrapped", link_download:"Scarica HTML", link_back:"← Indietro",
+    l_auto:"Generazione automatica", opt_off:"disattivato", opt_both:"mensile + annuale",
     col_entity:"entità", col_entities:"entità", col_label:"etichetta",
     col_aggregate:"aggregato", col_unit:"unità", col_scale:"fattore",
     col_decimals:"decimali", col_footnote:"nota", col_tostate:"stato finale",
@@ -651,7 +848,8 @@ const I18N = {
     help_counts:"Tellingen van statuswijzigingen via de geschiedenis-API (wasbeurten, deurbellen). Scheid meerdere entiteiten met komma's om ze als één op te tellen.",
     btn_addstat:"+ Statistiek toevoegen", btn_addcount:"+ Telling toevoegen",
     btn_save:"Opslaan", btn_generate:"Opslaan en genereren",
-    link_open:"Wrapped openen", link_download:"HTML downloaden",
+    link_open:"Wrapped openen", link_download:"HTML downloaden", link_back:"← Terug",
+    l_auto:"Automatisch genereren", opt_off:"uit", opt_both:"maandelijks + jaarlijks",
     col_entity:"entiteit", col_entities:"entiteit(en)", col_label:"label",
     col_aggregate:"aggregaat", col_unit:"eenheid", col_scale:"factor",
     col_decimals:"decimalen", col_footnote:"voetnoot", col_tostate:"doelstatus",
@@ -677,7 +875,8 @@ const I18N = {
     help_counts:"Contagens de mudanças de estado via API de histórico (lavagens, campainhas). Separe várias entidades por vírgula para somá-las como uma.",
     btn_addstat:"+ Adicionar estatística", btn_addcount:"+ Adicionar contagem",
     btn_save:"Guardar", btn_generate:"Guardar e gerar",
-    link_open:"Abrir o wrapped", link_download:"Transferir HTML",
+    link_open:"Abrir o wrapped", link_download:"Transferir HTML", link_back:"← Voltar",
+    l_auto:"Geração automática", opt_off:"desligado", opt_both:"mensal + anual",
     col_entity:"entidade", col_entities:"entidade(s)", col_label:"rótulo",
     col_aggregate:"agregado", col_unit:"unidade", col_scale:"fator",
     col_decimals:"casas decimais", col_footnote:"nota de rodapé", col_tostate:"estado alvo",
@@ -854,6 +1053,7 @@ function collect(){
     language:$("language").value, number_format:$("number_format").value,
     theme:$("theme").value, tz_offset:$("tz_offset").value,
     tone:$("tone").value, anthropic_api_key:$("anthropic_api_key").value,
+    auto_generate:$("auto_generate").value,
     statistics:readRows("statistics"), counts:readRows("counts"),
   };
   const y=$("year").value.trim(), m=$("month").value.trim();
@@ -882,23 +1082,21 @@ function showLinks(){ $("links").style.display="flex"; }
 // "download" URLs: Home Assistant returns 401 for ingress paths opened as a
 // top-level navigation in a new tab -- they are only valid as sub-requests
 // from inside the authenticated HA iframe. So we fetch the file the same way
-// the api/* calls already do (the request carries the ingress session), then
-// hand the browser a local blob: URL, which has no such guard.
+// the api/* calls already do (the request carries the ingress session) and
+// show it full-screen in an isolated iframe right here in the panel.
 async function openWrapped(){
-  // Open the tab synchronously inside the click gesture so the popup blocker
-  // lets it through; fill it once the fetch resolves.
-  const w = window.open("", "_blank");
-  if(w){ try{ w.document.write("<!doctype html><title>HA Wrapped</title><p style='font:1rem system-ui;padding:2rem'>Loading…</p>"); }catch(e){} }
+  $("status").textContent = t("st_working");
   try{
     const r = await fetch("view", {cache:"no-store"});
     if(!r.ok) throw new Error("HTTP "+r.status);
-    const url = URL.createObjectURL(await r.blob());
-    if(w) w.location = url;          // new tab: render the blob
-    else  location.assign(url);      // popup blocked: fall back to this frame
-  }catch(e){
-    if(w) w.close();
-    $("status").textContent = t("st_error");
-  }
+    $("viewer-frame").srcdoc = await r.text();
+    $("viewer").classList.add("open");
+    $("status").textContent = "";
+  }catch(e){ $("status").textContent = t("st_error"); }
+}
+function closeWrapped(){
+  $("viewer").classList.remove("open");
+  $("viewer-frame").srcdoc = "";  // unload the page so it stops animating
 }
 
 async function downloadWrapped(){
@@ -951,7 +1149,7 @@ async function init(){
   // migrate legacy country-named number formats to the neutral keys
   const NF_LEGACY={en:"comma_dot",de:"dot_comma"};
   if(cfg.number_format in NF_LEGACY) cfg.number_format=NF_LEGACY[cfg.number_format];
-  ["house_name","period","language","number_format","theme","tz_offset","tone","anthropic_api_key"]
+  ["house_name","period","language","number_format","theme","tz_offset","tone","anthropic_api_key","auto_generate"]
     .forEach(k=>{ if(cfg[k]!=null) $(k).value=cfg[k]; });
   // only repopulate year/month from a real number -- a legacy config could
   // still carry a stray "None"/"auto" string we don't want to show as a value
