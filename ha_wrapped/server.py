@@ -36,6 +36,23 @@ PORT = int(os.environ.get("INGRESS_PORT", "8099"))
 SUPERVISOR_CORE = "http://supervisor/core"
 SUPERVISOR_WS = "ws://supervisor/core/websocket"
 
+# A tiny static wrapper dropped next to the generated file. HA serves /local
+# with a long-lived cache, so an iframe pointed straight at ha_wrapped.html
+# keeps showing the previously cached copy after a re-generate. This wrapper's
+# own content never changes (so HA may cache it freely), but its inline script
+# re-loads the real file with a fresh ?v= timestamp on every page load, so the
+# browser can never serve a stale ha_wrapped.html. Point dashboards at
+# latest.html instead of ha_wrapped.html and they always show the newest run.
+WRAPPER_HTML = """<!doctype html>
+<meta charset="utf-8">
+<title>HA Wrapped</title>
+<style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100%}</style>
+<iframe id="f" allowfullscreen></iframe>
+<script>
+  document.getElementById("f").src = "ha_wrapped.html?v=" + Date.now();
+</script>
+"""
+
 DEFAULT_CONFIG = {
     "period": "yearly",
     "year": None,
@@ -138,6 +155,8 @@ def publish(src: Path, names) -> list[str]:
             d.mkdir(parents=True, exist_ok=True)
             for n in names:
                 (d / n).write_text(html)
+            # cache-busting wrapper for dashboard embedding (see WRAPPER_HTML)
+            (d / "latest.html").write_text(WRAPPER_HTML)
             done.append(label)
         except Exception as e:  # noqa: BLE001
             print(f"  (could not copy to {label}: {e})", flush=True)
@@ -680,6 +699,7 @@ INDEX_HTML = r"""<!doctype html>
     <button class="btn secondary" id="lnk_view" onclick="openWrapped()" data-i18n="link_open">Open wrapped</button>
     <button class="btn secondary" id="lnk_dl" onclick="downloadWrapped()" data-i18n="link_download">Download HTML</button>
   </div>
+  <p class="muted" id="dash_hint" data-i18n="dash_hint">For dashboards, embed /local/ha-wrapped/latest.html — it always shows the newest run (no browser cache).</p>
   <pre id="log"></pre>
 
   <div id="viewer" class="viewer">
@@ -714,6 +734,7 @@ const I18N = {
     btn_addstat:"+ Add statistic", btn_addcount:"+ Add count",
     btn_save:"Save", btn_generate:"Save & Generate",
     link_open:"Open wrapped", link_download:"Download HTML", link_back:"← Back",
+    dash_hint:"For dashboards, embed /local/ha-wrapped/latest.html — it always shows the newest run (no browser cache).",
     l_auto:"Auto-generate", opt_off:"off", opt_both:"monthly + yearly",
     col_entity:"entity", col_entities:"entity(ies)", col_label:"label",
     col_aggregate:"aggregate", col_unit:"unit", col_scale:"scale",
@@ -741,6 +762,7 @@ const I18N = {
     btn_addstat:"+ Statistik hinzufügen", btn_addcount:"+ Zählung hinzufügen",
     btn_save:"Speichern", btn_generate:"Speichern & Erstellen",
     link_open:"Wrapped öffnen", link_download:"HTML herunterladen", link_back:"← Zurück",
+    dash_hint:"Für Dashboards /local/ha-wrapped/latest.html einbinden — zeigt immer den neuesten Lauf (kein Browser-Cache).",
     l_auto:"Automatisch erstellen", opt_off:"aus", opt_both:"monatlich + jährlich",
     col_entity:"Entität", col_entities:"Entität(en)", col_label:"Bezeichnung",
     col_aggregate:"Aggregat", col_unit:"Einheit", col_scale:"Faktor",
@@ -768,6 +790,7 @@ const I18N = {
     btn_addstat:"+ Ajouter une statistique", btn_addcount:"+ Ajouter un comptage",
     btn_save:"Enregistrer", btn_generate:"Enregistrer et générer",
     link_open:"Ouvrir le wrapped", link_download:"Télécharger le HTML", link_back:"← Retour",
+    dash_hint:"Pour les tableaux de bord, intégrez /local/ha-wrapped/latest.html — affiche toujours la dernière version (sans cache navigateur).",
     l_auto:"Génération auto", opt_off:"désactivé", opt_both:"mensuel + annuel",
     col_entity:"entité", col_entities:"entité(s)", col_label:"libellé",
     col_aggregate:"agrégat", col_unit:"unité", col_scale:"facteur",
@@ -795,6 +818,7 @@ const I18N = {
     btn_addstat:"+ Añadir estadística", btn_addcount:"+ Añadir recuento",
     btn_save:"Guardar", btn_generate:"Guardar y generar",
     link_open:"Abrir el wrapped", link_download:"Descargar HTML", link_back:"← Atrás",
+    dash_hint:"Para paneles, incrusta /local/ha-wrapped/latest.html — siempre muestra la última versión (sin caché del navegador).",
     l_auto:"Generación automática", opt_off:"desactivado", opt_both:"mensual + anual",
     col_entity:"entidad", col_entities:"entidad(es)", col_label:"etiqueta",
     col_aggregate:"agregado", col_unit:"unidad", col_scale:"factor",
@@ -822,6 +846,7 @@ const I18N = {
     btn_addstat:"+ Aggiungi statistica", btn_addcount:"+ Aggiungi conteggio",
     btn_save:"Salva", btn_generate:"Salva e genera",
     link_open:"Apri il wrapped", link_download:"Scarica HTML", link_back:"← Indietro",
+    dash_hint:"Per le dashboard, incorpora /local/ha-wrapped/latest.html — mostra sempre l'ultima versione (nessuna cache del browser).",
     l_auto:"Generazione automatica", opt_off:"disattivato", opt_both:"mensile + annuale",
     col_entity:"entità", col_entities:"entità", col_label:"etichetta",
     col_aggregate:"aggregato", col_unit:"unità", col_scale:"fattore",
@@ -849,6 +874,7 @@ const I18N = {
     btn_addstat:"+ Statistiek toevoegen", btn_addcount:"+ Telling toevoegen",
     btn_save:"Opslaan", btn_generate:"Opslaan en genereren",
     link_open:"Wrapped openen", link_download:"HTML downloaden", link_back:"← Terug",
+    dash_hint:"Voor dashboards: gebruik /local/ha-wrapped/latest.html — toont altijd de nieuwste versie (geen browsercache).",
     l_auto:"Automatisch genereren", opt_off:"uit", opt_both:"maandelijks + jaarlijks",
     col_entity:"entiteit", col_entities:"entiteit(en)", col_label:"label",
     col_aggregate:"aggregaat", col_unit:"eenheid", col_scale:"factor",
@@ -876,6 +902,7 @@ const I18N = {
     btn_addstat:"+ Adicionar estatística", btn_addcount:"+ Adicionar contagem",
     btn_save:"Guardar", btn_generate:"Guardar e gerar",
     link_open:"Abrir o wrapped", link_download:"Transferir HTML", link_back:"← Voltar",
+    dash_hint:"Para painéis, incorpore /local/ha-wrapped/latest.html — mostra sempre a versão mais recente (sem cache do navegador).",
     l_auto:"Geração automática", opt_off:"desligado", opt_both:"mensal + anual",
     col_entity:"entidade", col_entities:"entidade(s)", col_label:"rótulo",
     col_aggregate:"agregado", col_unit:"unidade", col_scale:"fator",

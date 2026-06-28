@@ -58,20 +58,28 @@ Anthropic API key. No entity history is uploaded anywhere.
 Every generated wrapped is also written to your HA config's `www/` folder, so
 it is served by Home Assistant at:
 
+- `/local/ha-wrapped/latest.html` — **use this in dashboards** (always shows
+  the newest run, cache-proof — see the note below)
 - `/local/ha-wrapped/ha_wrapped.html` — the latest generation (manual or auto)
 - `/local/ha-wrapped/monthly.html` — the latest auto-generated month
 - `/local/ha-wrapped/yearly.html` — the latest auto-generated year
 
-To show it on a dashboard, add a **Webpage card** pointing at one of those
-URLs, for example:
+To show it on a dashboard, add a **Webpage card** pointing at `latest.html`:
 
 ```yaml
 type: iframe
-url: /local/ha-wrapped/ha_wrapped.html
+url: /local/ha-wrapped/latest.html
 aspect_ratio: 150%
 ```
 
-(The file is also mirrored to `/share/ha-wrapped/` for Samba/SSH.)
+> **Why `latest.html`?** Home Assistant serves files under `/local` with a
+> long browser cache. An iframe pointed straight at `ha_wrapped.html` keeps
+> showing the previously cached run after you re-generate (you'd have to hard
+> refresh). `latest.html` is a tiny wrapper that reloads the real file with a
+> fresh timestamp on every page load, so your dashboard always shows the most
+> recent wrapped without any manual refresh.
+
+(The files are also mirrored to `/share/ha-wrapped/` for Samba/SSH.)
 
 ## Automatic generation
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.9
+
+- **Dashboards always show the newest wrapped.** Home Assistant serves files
+  under `/local` with a long browser cache, so an iframe pointed straight at
+  `ha_wrapped.html` kept showing the previously cached run after a
+  re-generate (even though the add-on's own preview was already current).
+  Each generation now also writes a tiny `latest.html` wrapper next to the
+  file; it reloads the real wrapped with a fresh cache-busting timestamp on
+  every page load. Point your dashboard's Webpage/iframe card at
+  `/local/ha-wrapped/latest.html` and it will always show the latest run with
+  no manual refresh. A hint in the config UI spells this out.
+
 ## 1.0.8
 
 - **Updates now actually ship the latest engine.** The image installs the
