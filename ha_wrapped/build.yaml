@@ -13,4 +13,4 @@ build_from:
 # serving a stale cached layer. Bump it together with config.yaml `version:`.
 args:
   HA_WRAPPED_REF: main
-  ENGINE_CACHE_BUST: "1.0.8"
+  ENGINE_CACHE_BUST: "1.0.9"
