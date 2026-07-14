@@ -366,9 +366,17 @@ def claude_copy(stats, period_label, language="en", tone="dry, witty, deadpan",
         print("  (no ANTHROPIC_API_KEY set, skipping witty copy)")
         return {}
 
+    # `value` must be unambiguous regardless of the target language: a
+    # locale-formatted string like the German "4,343" (= 4.343) reads as
+    # "four thousand three hundred forty-three" under the far more common
+    # comma-thousands convention, and the model reliably mis-parses it --
+    # then writes the wrong magnitude back out in the quip. Plain notation
+    # (period as decimal point, never a thousands separator) has only one
+    # possible reading.
     facts = [
         {"id": s["id"], "label": s["label"],
-         "value": s["display_value"], "unit": s.get("unit", "")}
+         "value": fmt(s["value"], s.get("decimals", 0), "plain_dot"),
+         "unit": s.get("unit", "")}
         for s in stats
     ]
     span = "a single month" if period_kind == "monthly" else "a full year"
@@ -379,6 +387,11 @@ def claude_copy(stats, period_label, language="en", tone="dry, witty, deadpan",
         "home.\n"
         f"This recap covers {span}, so any forward-looking line (the outro) "
         f"should look ahead to {ahead}, not to a year.\n"
+        "Each stat's `value` is plain notation: a period is always the "
+        "decimal point, there is never a thousands separator, so its exact "
+        "magnitude is unambiguous. When you write that number out in "
+        f"{language}, use {language}'s normal formatting conventions but "
+        "keep the exact magnitude -- do not reinterpret the separator.\n"
         f"Language: {language}. Tone: {tone}. Short and punchy.\n"
         "Write like a person, not a marketing deck or an AI assistant: "
         "plain words, no cringe, no emojis, no exclamation-mark spam, no "
@@ -542,6 +555,7 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
                 "label": label,
                 "unit": s.get("unit", ""),
                 "value": total,
+                "decimals": s.get("decimals", 0),
                 "display_value": fmt(total, s.get("decimals", 0), nfmt),
                 "series": series,
                 "footnote": s.get("footnote", ""),
@@ -574,6 +588,7 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
             "label": label,
             "unit": c.get("unit", "x"),
             "value": value,
+            "decimals": c.get("decimals", 0),
             "display_value": fmt(value, c.get("decimals", 0), nfmt),
             "series": [v * scale for v in series],
             "footnote": c.get("footnote", ""),

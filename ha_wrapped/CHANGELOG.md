@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.10
+
+- **Fixed: AI copy sometimes inflated a number by 1000x.** The Claude prompt
+  was handed the page's own locale-formatted number (e.g. the German
+  "4,343" for 4.343 kWh). That string is genuinely ambiguous -- under the
+  far more common comma-thousands convention it reads as four thousand
+  three hundred forty-three -- and the model would occasionally misread it
+  and write the wrong magnitude into the quip. Facts sent to Claude now use
+  an unambiguous plain-notation number (period as decimal point, never a
+  thousands separator), and the prompt tells it to reformat that number for
+  the target language rather than re-derive it from a pre-formatted string.
+- **New: `sensor.ha_wrapped_last_run`.** Every generate (manual or via
+  auto-generate) now updates a Home Assistant sensor with the timestamp of
+  the last run (`ok`, `period` and `mode` as attributes), so you can see it
+  on a dashboard or trigger automations off it without opening the add-on
+  panel.
+
 ## 1.0.9
 
 - **Dashboards always show the newest wrapped.** Home Assistant serves files

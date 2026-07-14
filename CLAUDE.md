@@ -65,8 +65,12 @@ dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
     summed across all of them (e.g. several shutters as one stat).
     `fetch_count()` buckets by day-of-month (monthly) or month (yearly).
 - Payload contract for the template: see `payload = {...}` in `main()`.
-  Each stat: `id, label, unit, value, display_value, series[n_periods],
-  headline, quip, footnote`. UI strings live in `payload.i18n`;
+  Each stat: `id, label, unit, value, decimals, display_value,
+  series[n_periods], headline, quip, footnote`. `decimals` is the raw
+  precision behind `display_value` (unused by the template, but needed by
+  `claude_copy()` to hand Claude an unambiguous plain-notation number rather
+  than the locale-formatted string -- see the Claude copy note below). UI
+  strings live in `payload.i18n`;
   `payload.theme` (`auto|dark|light`) sets the default theme;
   `payload.period_label` is the human-readable range (`"2025"`,
   `"Jan – Jun 2025"`, `"May 2025"`, `"1.–13. May 2025"`);
@@ -78,7 +82,14 @@ dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
 - Claude copy: `claude_copy()` sends aggregated numbers only (never raw
   history) and expects strict JSON back; any failure falls back to plain
   labels. Model: `claude-sonnet-4-6`. `language`, `tone` and
-  `period_label` come from config/`compute_period()`.
+  `period_label` come from config/`compute_period()`. Each fact's `value`
+  is formatted `plain_dot` (period decimal point, never a thousands
+  separator) regardless of the page's own `number_format` -- a
+  locale-formatted string like the German "4,343" (= 4.343) is genuinely
+  ambiguous to the model (it reads as 4,343 under the comma-thousands
+  convention) and it will misreport the magnitude in the quip. The prompt
+  tells Claude to reformat that unambiguous number for `language` itself,
+  not to re-derive it from a pre-formatted string.
 - Auth via env: `HA_TOKEN` (required), `ANTHROPIC_API_KEY` (optional).
 - Recap card: the last `.summary` section in `template.html` renders a
   compact grid of every stat (`display_value` + `unit` + `headline`),
