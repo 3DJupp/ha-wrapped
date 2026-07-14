@@ -20,6 +20,7 @@ import json
 import os
 from pathlib import Path
 
+import requests
 import yaml
 from aiohttp import ClientSession, ClientTimeout, web
 
@@ -163,6 +164,30 @@ def publish(src: Path, names) -> list[str]:
     return done
 
 
+def push_last_run_sensor(ok: bool, period_label: str = "", mode: str = "") -> None:
+    """Set sensor.ha_wrapped_last_run via the Core API after a generate run.
+
+    Best-effort: lets HA dashboards/automations see the last run time without
+    opening the add-on panel. Uses the same Supervisor Core proxy as the rest
+    of the add-on (no extra token). A failure here must never fail the
+    generate itself, so it's logged and swallowed.
+    """
+    now = _dt.datetime.now().astimezone()
+    try:
+        requests.post(
+            f"{SUPERVISOR_CORE}/api/states/sensor.ha_wrapped_last_run",
+            headers={"Authorization": f"Bearer {token()}",
+                     "content-type": "application/json"},
+            json={"state": now.isoformat(timespec="seconds"),
+                  "attributes": {"friendly_name": "HA Wrapped Last Run",
+                                 "device_class": "timestamp",
+                                 "icon": "mdi:chart-box",
+                                 "ok": ok, "period": period_label, "mode": mode}},
+            timeout=15)
+    except Exception as e:  # noqa: BLE001
+        print(f"  (could not update sensor.ha_wrapped_last_run: {e})", flush=True)
+
+
 def save_config(cfg: dict) -> None:
     DATA.mkdir(parents=True, exist_ok=True)
     cfg = dict(cfg)
@@ -271,6 +296,7 @@ async def handle_generate(request: web.Request) -> web.Response:
     except (Exception, SystemExit) as e:  # noqa: BLE001
         # SystemExit too: find_template() exits if the template is missing,
         # and that surfaces here through the worker thread.
+        push_last_run_sensor(False, "", cfg.get("period", "yearly"))
         return web.json_response(
             {"ok": False, "error": str(e) or repr(e), "log": logs}, status=400)
 
@@ -279,6 +305,8 @@ async def handle_generate(request: web.Request) -> web.Response:
     for d in dests:
         log(f"  copied to {d}/ha_wrapped.html")
 
+    push_last_run_sensor(True, result.get("period_label", ""),
+                         cfg.get("period", "yearly"))
     return web.json_response({"ok": True, "result": result, "log": logs})
 
 
@@ -374,6 +402,7 @@ def _run_one(base_cfg: dict, *, period: str, year: int, month: int | None) -> No
     dests = publish(out, names)
     log(f"done {tag} -> " + ", ".join(d + "/" + n for d in dests for n in names)
         if dests else f"done {tag} (local copy only)")
+    push_last_run_sensor(True, tag, period)
 
 
 def run_auto_due() -> None:
@@ -403,6 +432,7 @@ def run_auto_due() -> None:
                 _save_auto_state(state)
             except Exception as e:  # noqa: BLE001
                 print(f"[auto] monthly failed: {e}", flush=True)
+                push_last_run_sensor(False, key, "monthly")
 
     if do_year:
         py = now.year - 1
@@ -414,6 +444,7 @@ def run_auto_due() -> None:
                 _save_auto_state(state)
             except Exception as e:  # noqa: BLE001
                 print(f"[auto] yearly failed: {e}", flush=True)
+                push_last_run_sensor(False, key, "yearly")
 
 
 async def scheduler() -> None:

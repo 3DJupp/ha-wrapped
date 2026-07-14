@@ -96,6 +96,11 @@ the **Timezone offset** to decide when a month/year has ended. Combined with a
 Webpage card pointing at `/local/ha-wrapped/monthly.html` or `yearly.html`,
 your dashboard updates itself.
 
+Every generate — manual (the Generate button) or automatic — updates
+`sensor.ha_wrapped_last_run` with the timestamp of that run, plus `ok`,
+`period` and `mode` attributes. Use it on a dashboard or as an automation
+trigger to know a fresh wrapped is ready without opening the add-on panel.
+
 ## Configuration tab
 
 The native add-on **Configuration** tab only holds `log_level`. Everything
