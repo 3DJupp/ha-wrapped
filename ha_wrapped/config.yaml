@@ -3,7 +3,7 @@
 # in the add-on's own Ingress UI (with entity pickers), so the native schema
 # here stays intentionally small.
 name: HA Wrapped
-version: "1.0.10"
+version: "1.0.11"
 slug: ha_wrapped
 description: A Spotify-Wrapped-style year (or month) review for your Home Assistant.
 url: https://github.com/3DJupp/ha-wrapped/tree/main/ha_wrapped
@@ -26,6 +26,10 @@ panel_title: Wrapped
 # WebSocket API, history + states over REST) using the add-on's own token --
 # the user never has to create a long-lived access token.
 homeassistant_api: true
+
+# Accept commands on stdin, so a Home Assistant automation can trigger a run
+# on its own schedule via the `hassio.addon_stdin` action (see DOCS.md).
+stdin: true
 
 # The rendered HTML + PNG are written to /data (persistent, served via Ingress)
 # and copied to /share/ha-wrapped/ (Samba/SSH) and to the HA config's www/

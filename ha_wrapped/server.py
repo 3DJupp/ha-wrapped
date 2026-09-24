@@ -18,6 +18,9 @@ import asyncio
 import datetime as _dt
 import json
 import os
+import socket
+import sys
+import threading
 from pathlib import Path
 
 import requests
@@ -36,6 +39,16 @@ PORT = int(os.environ.get("INGRESS_PORT", "8099"))
 
 SUPERVISOR_CORE = "http://supervisor/core"
 SUPERVISOR_WS = "ws://supervisor/core/websocket"
+
+# One generate at a time: the Generate button, the scheduler and stdin
+# commands all write the same output files, so they queue up behind this.
+RUN_LOCK = threading.Lock()
+# Guards read-modify-write of AUTO_STATE (a long auto run must not overwrite
+# a "last run" record written by a manual generate in the meantime).
+STATE_LOCK = threading.Lock()
+# The scheduler and a stdin "auto" command must not both work off the same
+# due period at once (each would see it as not done yet and render it twice).
+AUTO_LOCK = threading.Lock()
 
 # A tiny static wrapper dropped next to the generated file. HA serves /local
 # with a long-lived cache, so an iframe pointed straight at ha_wrapped.html
@@ -164,26 +177,48 @@ def publish(src: Path, names) -> list[str]:
     return done
 
 
-def push_last_run_sensor(ok: bool, period_label: str = "", mode: str = "") -> None:
+def push_last_run_sensor(ok: bool, period_label: str = "", mode: str = "",
+                         *, error: str = "", record: bool = True,
+                         when: str | None = None) -> None:
     """Set sensor.ha_wrapped_last_run via the Core API after a generate run.
 
     Best-effort: lets HA dashboards/automations see the last run time without
     opening the add-on panel. Uses the same Supervisor Core proxy as the rest
     of the add-on (no extra token). A failure here must never fail the
     generate itself, so it's logged and swallowed.
+
+    The run is also recorded in AUTO_STATE (`record`), because a sensor set
+    through the REST API is not restored by HA: after a Core restart it is
+    gone until the next run, which for a monthly schedule can be weeks. The
+    scheduler re-pushes the recorded run (`record=False`, original `when`).
     """
-    now = _dt.datetime.now().astimezone()
+    when = when or _dt.datetime.now().astimezone().isoformat(timespec="seconds")
+    last = {"at": when, "ok": ok, "period": period_label, "mode": mode,
+            "error": (error or "")[:300]}
+    if record:
+        _update_state(lambda s: s.__setitem__("_last", last))
+    attrs = {"friendly_name": "HA Wrapped Last Run",
+             "device_class": "timestamp",
+             "icon": "mdi:chart-box",
+             "ok": ok, "period": period_label, "mode": mode}
+    if error:
+        attrs["error"] = last["error"]
     try:
-        requests.post(
+        cfg = load_config()
+        attrs["auto_generate"] = cfg.get("auto_generate") or "off"
+        nxt = next_auto_run(cfg)
+        if nxt:
+            attrs["next_run"] = nxt.isoformat(timespec="seconds")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        r = requests.post(
             f"{SUPERVISOR_CORE}/api/states/sensor.ha_wrapped_last_run",
             headers={"Authorization": f"Bearer {token()}",
                      "content-type": "application/json"},
-            json={"state": now.isoformat(timespec="seconds"),
-                  "attributes": {"friendly_name": "HA Wrapped Last Run",
-                                 "device_class": "timestamp",
-                                 "icon": "mdi:chart-box",
-                                 "ok": ok, "period": period_label, "mode": mode}},
+            json={"state": when, "attributes": attrs},
             timeout=15)
+        r.raise_for_status()
     except Exception as e:  # noqa: BLE001
         print(f"  (could not update sensor.ha_wrapped_last_run: {e})", flush=True)
 
@@ -217,6 +252,9 @@ async def handle_save_config(request: web.Request) -> web.Response:
     body = await request.json()
     cfg = {**DEFAULT_CONFIG, **body}
     save_config(cfg)
+    # let the scheduler re-check right away, so switching Auto-generate on
+    # takes effect now instead of on the next tick
+    request.app["wake"].set()
     return web.json_response({"ok": True})
 
 
@@ -264,13 +302,15 @@ async def handle_statistics(request: web.Request) -> web.Response:
     return web.json_response(out)
 
 
-async def handle_generate(request: web.Request) -> web.Response:
-    cfg = load_config()
-    logs: list[str] = []
+def generate_now(overrides: dict | None = None, log=print) -> dict:
+    """Render with the saved config (plus `overrides`) into OUTPUT_HTML.
 
-    def log(msg):
-        logs.append(str(msg))
-        print(msg, flush=True)
+    The shared path behind the Generate button and the stdin `generate`
+    command. Blocking -- call from a worker thread, never the event loop.
+    Pushes the last-run sensor either way and re-raises on failure.
+    """
+    cfg = load_config()
+    cfg.update(overrides or {})
 
     debug = log_level() in ("debug", "trace")
     if debug:
@@ -279,8 +319,9 @@ async def handle_generate(request: web.Request) -> web.Response:
     # Ensure year/month are concrete integers before handing off to the engine.
     # The engine's compute_period() crashes on None values in older builds; we
     # default here so the add-on is resilient regardless of which engine
-    # version is installed in the container.
-    _now = _dt.datetime.now()
+    # version is installed in the container. Uses the configured tz_offset so
+    # "last month" flips at local midnight, like the engine and the scheduler.
+    _now = _dt.datetime.now(_tz(cfg))
     _last_mo = (_now.replace(day=1) - _dt.timedelta(days=1))
     if not _opt_int(cfg.get("year")):
         cfg["year"] = _last_mo.year if cfg.get("period") == "monthly" else _now.year
@@ -288,26 +329,72 @@ async def handle_generate(request: web.Request) -> web.Response:
         cfg["month"] = _last_mo.month
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(None, lambda: wrapped.collect_and_render(
-            cfg, ha_url=SUPERVISOR_CORE, token=token(), ws_url=SUPERVISOR_WS,
-            output=str(OUTPUT_HTML), debug=debug, log=log))
+        with RUN_LOCK:
+            result = wrapped.collect_and_render(
+                cfg, ha_url=SUPERVISOR_CORE, token=token(), ws_url=SUPERVISOR_WS,
+                output=str(OUTPUT_HTML), debug=debug, log=log)
+            # mirror to /share (Samba/SSH) and /local (dashboard embedding),
+            # best-effort -- still under the lock, so a queued auto run can't
+            # swap OUTPUT_HTML between render and copy
+            dests = publish(OUTPUT_HTML, ["ha_wrapped.html"])
     except (Exception, SystemExit) as e:  # noqa: BLE001
         # SystemExit too: find_template() exits if the template is missing,
         # and that surfaces here through the worker thread.
-        push_last_run_sensor(False, "", cfg.get("period", "yearly"))
-        return web.json_response(
-            {"ok": False, "error": str(e) or repr(e), "log": logs}, status=400)
+        push_last_run_sensor(False, "", cfg.get("period", "yearly"),
+                             error=str(e) or repr(e))
+        raise
 
-    # mirror to /share (Samba/SSH) and /local (dashboard embedding), best-effort
-    dests = publish(OUTPUT_HTML, ["ha_wrapped.html"])
     for d in dests:
         log(f"  copied to {d}/ha_wrapped.html")
 
     push_last_run_sensor(True, result.get("period_label", ""),
                          cfg.get("period", "yearly"))
+    return result
+
+
+async def handle_generate(request: web.Request) -> web.Response:
+    logs: list[str] = []
+
+    def log(msg):
+        logs.append(str(msg))
+        print(msg, flush=True)
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(None, lambda: generate_now(log=log))
+    except (Exception, SystemExit) as e:  # noqa: BLE001
+        return web.json_response(
+            {"ok": False, "error": str(e) or repr(e), "log": logs}, status=400)
     return web.json_response({"ok": True, "result": result, "log": logs})
+
+
+def addon_slug() -> str:
+    """This add-on's slug, for the hassio.addon_stdin hint in the UI.
+
+    The Supervisor names the container host after the slug with "_" turned
+    into "-" (e.g. `a1b2c3d4-ha-wrapped` for `a1b2c3d4_ha_wrapped`, or
+    `local-ha-wrapped` for a local install). Empty when that can't be read.
+    """
+    host = os.environ.get("HOSTNAME") or socket.gethostname()
+    suffix = "-ha-wrapped"
+    if host.endswith(suffix) and len(host) > len(suffix):
+        return host[:-len(suffix)] + "_ha_wrapped"
+    return ""
+
+
+async def handle_status(request: web.Request) -> web.Response:
+    """Auto-generate status for the UI: next run, last run, pending retries."""
+    cfg = load_config()
+    state = _auto_state()
+    nxt = next_auto_run(cfg, state=state)
+    return web.json_response({
+        "auto_generate": cfg.get("auto_generate") or "off",
+        "next_run": nxt.isoformat(timespec="seconds") if nxt else None,
+        "last": state.get("_last"),
+        "failing": state.get("_fail", {}),
+        "slug": addon_slug(),
+    })
 
 
 async def handle_view(request: web.Request) -> web.Response:
@@ -339,6 +426,15 @@ async def handle_download(request: web.Request) -> web.Response:
 
 # ------------------------------------------------------ auto-generation
 
+# How often the scheduler looks at the clock. Cheap (it only reads the config
+# and the state file); short enough that a new month is picked up promptly
+# instead of up to an hour late, depending on when the add-on happened to start.
+TICK_SECONDS = 600
+# Wait this long past midnight on the 1st before rendering the month that just
+# ended. HA compiles each hour's long-term statistics a few minutes after the
+# hour, so rendering at 00:00 sharp would miss the last hour of the month.
+GRACE = _dt.timedelta(minutes=30)
+
 
 def _tz(cfg: dict) -> _dt.timezone:
     """Parse the configured tz_offset ("+01:00") into a tzinfo.
@@ -356,6 +452,12 @@ def _tz(cfg: dict) -> _dt.timezone:
 
 
 def _auto_state() -> dict:
+    """What the scheduler has done so far (persisted in /data).
+
+    `m:YYYY-MM` / `y:YYYY` -> when that period was auto-generated,
+    `_fail` -> {key: {count, at, error}} for periods still being retried,
+    `_last` -> the last run of any kind (manual, auto, stdin) for the sensor.
+    """
     if AUTO_STATE.exists():
         try:
             return json.loads(AUTO_STATE.read_text())
@@ -371,13 +473,93 @@ def _save_auto_state(s: dict) -> None:
         print(f"[auto] could not save state: {e}", flush=True)
 
 
-def _run_one(base_cfg: dict, *, period: str, year: int, month: int | None) -> None:
-    """Generate one period and publish it. Runs in a worker thread."""
+def _update_state(fn) -> None:
+    """Re-read, modify (fn(state) in place) and save AUTO_STATE atomically."""
+    with STATE_LOCK:
+        s = _auto_state()
+        fn(s)
+        _save_auto_state(s)
+
+
+def _auto_mode(cfg: dict) -> str:
+    mode = str(cfg.get("auto_generate") or "off").lower()
+    return mode if mode in ("monthly", "yearly", "both") else "off"
+
+
+def _due_periods(cfg: dict, now: _dt.datetime) -> list[tuple]:
+    """The completed periods the auto mode wants rendered as of `now`.
+
+    Returns [(state_key, period, year, month)] -- the most recently completed
+    month and/or year, counted from `now - GRACE`.
+    """
+    mode = _auto_mode(cfg)
+    ref = now - GRACE
+    out = []
+    if mode in ("monthly", "both"):
+        pe = ref.replace(day=1) - _dt.timedelta(days=1)
+        out.append((f"m:{pe.year}-{pe.month:02d}", "monthly", pe.year, pe.month))
+    if mode in ("yearly", "both"):
+        out.append((f"y:{ref.year - 1}", "yearly", ref.year - 1, None))
+    return out
+
+
+def _retry_wait(fails: int) -> _dt.timedelta:
+    """Back off after failed auto runs: hourly for a while, then 6-hourly.
+
+    A failure is usually transient (Core restarting, network blip), but a
+    config problem would otherwise retry -- and log, and ping the sensor --
+    every tick for the rest of the month.
+    """
+    return _dt.timedelta(hours=1 if fails < 6 else 6)
+
+
+def next_auto_run(cfg: dict, now: _dt.datetime | None = None,
+                  state: dict | None = None) -> _dt.datetime | None:
+    """When the scheduler will (try to) generate next, or None when off."""
+    mode = _auto_mode(cfg)
+    if mode == "off":
+        return None
+    tz = _tz(cfg)
+    now = now or _dt.datetime.now(tz)
+    state = _auto_state() if state is None else state
+    fails = state.get("_fail", {})
+    pending = []
+    for key, *_ in _due_periods(cfg, now):
+        if key in state:
+            continue
+        f = fails.get(key)
+        if f:
+            try:
+                pending.append(_dt.datetime.fromisoformat(f["at"])
+                               + _retry_wait(int(f.get("count", 1))))
+                continue
+            except Exception:  # noqa: BLE001
+                pass
+        pending.append(now)
+    if pending:
+        return max(now, min(pending))
+    ref = now - GRACE
+    candidates = []
+    if mode in ("monthly", "both"):
+        nm = (ref.replace(day=1) + _dt.timedelta(days=32)).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0)
+        candidates.append(nm + GRACE)
+    if mode in ("yearly", "both"):
+        candidates.append(_dt.datetime(ref.year + 1, 1, 1, tzinfo=tz) + GRACE)
+    return min(candidates)
+
+
+def _run_one(base_cfg: dict, *, period: str, year: int, month: int | None) -> str:
+    """Generate one period and publish it. Runs in a worker thread.
+
+    Publishes under the latest, per-type and period-named names and pushes
+    the last-run sensor. Raises on failure (the caller decides about retries).
+    Returns the period tag ("2025-08" / "2025").
+    """
     cfg = dict(base_cfg)
     cfg["period"] = period
     cfg["year"] = year
-    if month:
-        cfg["month"] = month
+    cfg["month"] = month
     if period == "monthly":
         fname = f"ha_wrapped_{year}-{month:02d}.html"
         names = ["ha_wrapped.html", "monthly.html", fname]
@@ -393,16 +575,18 @@ def _run_one(base_cfg: dict, *, period: str, year: int, month: int | None) -> No
         print(f"[auto] {m}", flush=True)
 
     log(f"generating {period} {tag}")
-    wrapped.collect_and_render(
-        cfg, ha_url=SUPERVISOR_CORE, token=token(), ws_url=SUPERVISOR_WS,
-        output=str(out), debug=False, log=log)
-    # make the freshly generated period the default the UI/sidebar opens, and
-    # mirror to /share + /local (latest, per-type and period-named copies)
-    OUTPUT_HTML.write_text(out.read_text())
-    dests = publish(out, names)
+    with RUN_LOCK:
+        result = wrapped.collect_and_render(
+            cfg, ha_url=SUPERVISOR_CORE, token=token(), ws_url=SUPERVISOR_WS,
+            output=str(out), debug=False, log=log)
+        # make the freshly generated period the default the UI/sidebar opens,
+        # and mirror to /share + /local (latest, per-type and period-named)
+        OUTPUT_HTML.write_text(out.read_text())
+        dests = publish(out, names)
     log(f"done {tag} -> " + ", ".join(d + "/" + n for d in dests for n in names)
         if dests else f"done {tag} (local copy only)")
-    push_last_run_sensor(True, tag, period)
+    push_last_run_sensor(True, result.get("period_label", tag), period)
+    return tag
 
 
 def run_auto_due() -> None:
@@ -410,55 +594,182 @@ def run_auto_due() -> None:
 
     Keeps the most recently completed month/year (per the auto_generate mode)
     rendered. Records what it did in AUTO_STATE so it runs once per period, not
-    once per check. Blocking -- call from an executor, never the event loop.
+    once per check; failures are retried with a backoff. Blocking -- call from
+    an executor, never the event loop.
     """
+    if not AUTO_LOCK.acquire(blocking=False):
+        return  # another check is already on it
+    try:
+        _run_auto_due()
+    finally:
+        AUTO_LOCK.release()
+
+
+def _run_auto_due() -> None:
     cfg = load_config()
-    mode = (cfg.get("auto_generate") or "off").lower()
-    if mode in ("off", "", "none", "no"):
-        return
-    do_month = mode in ("monthly", "both")
-    do_year = mode in ("yearly", "both")
     now = _dt.datetime.now(_tz(cfg))
+    stamp = now.isoformat(timespec="seconds")
     state = _auto_state()
+    fails = state.get("_fail", {})
 
-    if do_month:
-        prev_end = now.replace(day=1) - _dt.timedelta(days=1)
-        key = f"m:{prev_end.year}-{prev_end.month:02d}"
-        if key not in state:
+    for key, period, year, month in _due_periods(cfg, now):
+        if key in state:
+            continue
+        f = fails.get(key)
+        if f:
             try:
-                _run_one(cfg, period="monthly",
-                         year=prev_end.year, month=prev_end.month)
-                state[key] = now.isoformat(timespec="seconds")
-                _save_auto_state(state)
-            except Exception as e:  # noqa: BLE001
-                print(f"[auto] monthly failed: {e}", flush=True)
-                push_last_run_sensor(False, key, "monthly")
+                retry_at = (_dt.datetime.fromisoformat(f["at"])
+                            + _retry_wait(int(f.get("count", 1))))
+                if now < retry_at:
+                    continue
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            _run_one(cfg, period=period, year=year, month=month)
+        except (Exception, SystemExit) as e:  # noqa: BLE001
+            # SystemExit too (template missing): uncaught it would not just
+            # end this run but tear down the event loop -- and the add-on.
+            err = str(e) or repr(e)
+            print(f"[auto] {period} {key[2:]} failed: {err}", flush=True)
 
-    if do_year:
-        py = now.year - 1
-        key = f"y:{py}"
-        if key not in state:
-            try:
-                _run_one(cfg, period="yearly", year=py, month=None)
-                state[key] = now.isoformat(timespec="seconds")
-                _save_auto_state(state)
-            except Exception as e:  # noqa: BLE001
-                print(f"[auto] yearly failed: {e}", flush=True)
-                push_last_run_sensor(False, key, "yearly")
+            def mark_fail(s, key=key, err=err):
+                prev = s.setdefault("_fail", {}).get(key) or {}
+                s["_fail"][key] = {"count": int(prev.get("count", 0)) + 1,
+                                   "at": stamp, "error": err[:300]}
+            _update_state(mark_fail)
+            push_last_run_sensor(False, key[2:], period, error=err)
+            continue
+
+        def mark_done(s, key=key):
+            s[key] = stamp
+            s.get("_fail", {}).pop(key, None)
+        _update_state(mark_done)
 
 
-async def scheduler() -> None:
-    """Hourly check that the latest completed period has been auto-generated."""
+def repush_sensor() -> None:
+    """Restore sensor.ha_wrapped_last_run from the recorded last run.
+
+    HA drops REST-created states on restart; re-pushing on every tick keeps
+    the sensor (and its next_run attribute) present. Setting an unchanged
+    state is a no-op in HA, so this doesn't spam the logbook.
+    """
+    last = _auto_state().get("_last")
+    if last and last.get("at"):
+        push_last_run_sensor(bool(last.get("ok")), last.get("period", ""),
+                             last.get("mode", ""), error=last.get("error", ""),
+                             record=False, when=last["at"])
+
+
+async def scheduler(app: web.Application) -> None:
+    """Check every few minutes (or right after a config save) whether the
+    latest completed period still needs to be auto-generated."""
     await asyncio.sleep(15)  # let the server settle before the first run
     loop = asyncio.get_running_loop()
+    wake: asyncio.Event = app["wake"]
+    while True:
+        wake.clear()
+        for job in (run_auto_due, repush_sensor):
+            try:
+                await loop.run_in_executor(None, job)
+            except asyncio.CancelledError:
+                raise
+            except (Exception, SystemExit) as e:  # noqa: BLE001
+                print(f"[auto] scheduler error: {e}", flush=True)
+        try:
+            await asyncio.wait_for(wake.wait(), TICK_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+
+
+# ------------------------------------------------------------ stdin commands
+
+
+def run_command(cmd) -> None:
+    """Run one command sent via the `hassio.addon_stdin` action.
+
+    Lets a Home Assistant automation drive generation on any schedule:
+
+      "generate"      -- same as the Generate button (saved config)
+      "monthly"       -- the month that just ended
+      "yearly"        -- the year that just ended
+      "this_month"    -- the current month so far
+      "this_year"     -- the current year so far
+      "auto"          -- whatever the Auto-generate schedule still owes
+      {"period": "monthly", "year": 2025, "month": 8}
+                      -- the saved config with these keys overridden
+    """
+    def log(m):
+        print(f"[stdin] {m}", flush=True)
+
+    if isinstance(cmd, str):
+        cmd = cmd.strip().strip('"').strip().lower()
+    log(f"received {cmd!r}")
+    try:
+        cfg = load_config()
+        now = _dt.datetime.now(_tz(cfg))
+        if cmd in ("", "generate", "run", "now"):
+            generate_now(log=log)
+        elif cmd == "auto":
+            run_auto_due()
+        elif cmd in ("monthly", "last_month"):
+            pe = now.replace(day=1) - _dt.timedelta(days=1)
+            _run_one(cfg, period="monthly", year=pe.year, month=pe.month)
+        elif cmd in ("yearly", "last_year"):
+            _run_one(cfg, period="yearly", year=now.year - 1, month=None)
+        elif cmd == "this_month":
+            _run_one(cfg, period="monthly", year=now.year, month=now.month)
+        elif cmd == "this_year":
+            _run_one(cfg, period="yearly", year=now.year, month=None)
+        elif isinstance(cmd, dict):
+            allowed = {k: cmd[k] for k in ("period", "year", "month") if k in cmd}
+            if allowed.get("period") not in (None, "monthly", "yearly"):
+                raise ValueError(f"period must be monthly or yearly, got {allowed['period']!r}")
+            generate_now(allowed, log=log)
+        else:
+            log("unknown command; use generate, monthly, yearly, this_month, "
+                "this_year, auto or {\"period\": ..., \"year\": ..., \"month\": ...}")
+            return
+    except (Exception, SystemExit) as e:  # noqa: BLE001
+        err = str(e) or repr(e)
+        log(f"failed: {err}")
+        if not isinstance(cmd, dict) and cmd not in ("", "generate", "run", "now", "auto"):
+            # generate_now/run_auto_due already reported their own failures
+            push_last_run_sensor(False, str(cmd), "", error=err)
+
+
+def stdin_reader() -> None:
+    """Read commands from stdin (the add-on has `stdin: true`). Own thread.
+
+    The Supervisor forwards the action's `input` JSON-encoded and not always
+    newline-terminated, so parse a stream of JSON values rather than lines;
+    a bare newline-terminated word (manual `docker attach`) works too.
+    """
+    try:
+        fd = sys.stdin.fileno()
+    except Exception:  # noqa: BLE001
+        return
+    dec = json.JSONDecoder()
+    buf = ""
     while True:
         try:
-            await loop.run_in_executor(None, run_auto_due)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:  # noqa: BLE001
-            print(f"[auto] scheduler error: {e}", flush=True)
-        await asyncio.sleep(3600)
+            chunk = os.read(fd, 4096)
+        except OSError:
+            return
+        if not chunk:
+            return  # EOF: stdin isn't attached
+        buf += chunk.decode("utf-8", "replace")
+        while True:
+            buf = buf.lstrip()
+            if not buf:
+                break
+            try:
+                obj, idx = dec.raw_decode(buf)
+                buf = buf[idx:]
+            except ValueError:
+                if "\n" not in buf:
+                    break  # wait for the rest of the value
+                obj, buf = buf.split("\n", 1)
+            run_command(obj)
 
 
 # ----------------------------------------------------------------- app
@@ -466,7 +777,9 @@ async def scheduler() -> None:
 
 async def on_startup(app: web.Application):
     app["http"] = ClientSession(timeout=ClientTimeout(total=60))
-    app["sched"] = asyncio.create_task(scheduler())
+    app["wake"] = asyncio.Event()
+    app["sched"] = asyncio.create_task(scheduler(app))
+    threading.Thread(target=stdin_reader, name="stdin", daemon=True).start()
 
 
 async def on_cleanup(app: web.Application):
@@ -489,6 +802,7 @@ def make_app() -> web.Application:
         web.get("/api/entities", handle_entities),
         web.get("/api/statistics", handle_statistics),
         web.post("/api/generate", handle_generate),
+        web.get("/api/status", handle_status),
         web.get("/view", handle_view),
         web.get("/download", handle_download),
     ])
@@ -731,6 +1045,7 @@ INDEX_HTML = r"""<!doctype html>
     <button class="btn secondary" id="lnk_dl" onclick="downloadWrapped()" data-i18n="link_download">Download HTML</button>
   </div>
   <p class="muted" id="dash_hint" data-i18n="dash_hint">For dashboards, embed /local/ha-wrapped/latest.html — it always shows the newest run (no browser cache).</p>
+  <p class="muted" id="auto_status"></p>
   <pre id="log"></pre>
 
   <div id="viewer" class="viewer">
@@ -766,6 +1081,9 @@ const I18N = {
     btn_save:"Save", btn_generate:"Save & Generate",
     link_open:"Open wrapped", link_download:"Download HTML", link_back:"← Back",
     dash_hint:"For dashboards, embed /local/ha-wrapped/latest.html — it always shows the newest run (no browser cache).",
+    auto_next:"Next automatic run:", auto_last:"Last run:", auto_ok:"ok", auto_failed:"failed",
+    auto_retry:"Will retry, last error:",
+    auto_stdin:"Own schedule? An automation can call hassio.addon_stdin with addon: {slug} and input: generate (or monthly, yearly, this_month).",
     l_auto:"Auto-generate", opt_off:"off", opt_both:"monthly + yearly",
     col_entity:"entity", col_entities:"entity(ies)", col_label:"label",
     col_aggregate:"aggregate", col_unit:"unit", col_scale:"scale",
@@ -794,6 +1112,9 @@ const I18N = {
     btn_save:"Speichern", btn_generate:"Speichern & Erstellen",
     link_open:"Wrapped öffnen", link_download:"HTML herunterladen", link_back:"← Zurück",
     dash_hint:"Für Dashboards /local/ha-wrapped/latest.html einbinden — zeigt immer den neuesten Lauf (kein Browser-Cache).",
+    auto_next:"Nächster automatischer Lauf:", auto_last:"Letzter Lauf:", auto_ok:"ok", auto_failed:"fehlgeschlagen",
+    auto_retry:"Neuer Versuch folgt, letzter Fehler:",
+    auto_stdin:"Eigener Zeitplan? Eine Automation kann hassio.addon_stdin mit addon: {slug} und input: generate (oder monthly, yearly, this_month) aufrufen.",
     l_auto:"Automatisch erstellen", opt_off:"aus", opt_both:"monatlich + jährlich",
     col_entity:"Entität", col_entities:"Entität(en)", col_label:"Bezeichnung",
     col_aggregate:"Aggregat", col_unit:"Einheit", col_scale:"Faktor",
@@ -822,6 +1143,9 @@ const I18N = {
     btn_save:"Enregistrer", btn_generate:"Enregistrer et générer",
     link_open:"Ouvrir le wrapped", link_download:"Télécharger le HTML", link_back:"← Retour",
     dash_hint:"Pour les tableaux de bord, intégrez /local/ha-wrapped/latest.html — affiche toujours la dernière version (sans cache navigateur).",
+    auto_next:"Prochaine génération auto :", auto_last:"Dernière exécution :", auto_ok:"ok", auto_failed:"échec",
+    auto_retry:"Nouvel essai prévu, dernière erreur :",
+    auto_stdin:"Votre propre planning ? Une automatisation peut appeler hassio.addon_stdin avec addon: {slug} et input: generate (ou monthly, yearly, this_month).",
     l_auto:"Génération auto", opt_off:"désactivé", opt_both:"mensuel + annuel",
     col_entity:"entité", col_entities:"entité(s)", col_label:"libellé",
     col_aggregate:"agrégat", col_unit:"unité", col_scale:"facteur",
@@ -850,6 +1174,9 @@ const I18N = {
     btn_save:"Guardar", btn_generate:"Guardar y generar",
     link_open:"Abrir el wrapped", link_download:"Descargar HTML", link_back:"← Atrás",
     dash_hint:"Para paneles, incrusta /local/ha-wrapped/latest.html — siempre muestra la última versión (sin caché del navegador).",
+    auto_next:"Próxima ejecución automática:", auto_last:"Última ejecución:", auto_ok:"ok", auto_failed:"fallida",
+    auto_retry:"Se reintentará, último error:",
+    auto_stdin:"¿Horario propio? Una automatización puede llamar a hassio.addon_stdin con addon: {slug} e input: generate (o monthly, yearly, this_month).",
     l_auto:"Generación automática", opt_off:"desactivado", opt_both:"mensual + anual",
     col_entity:"entidad", col_entities:"entidad(es)", col_label:"etiqueta",
     col_aggregate:"agregado", col_unit:"unidad", col_scale:"factor",
@@ -878,6 +1205,9 @@ const I18N = {
     btn_save:"Salva", btn_generate:"Salva e genera",
     link_open:"Apri il wrapped", link_download:"Scarica HTML", link_back:"← Indietro",
     dash_hint:"Per le dashboard, incorpora /local/ha-wrapped/latest.html — mostra sempre l'ultima versione (nessuna cache del browser).",
+    auto_next:"Prossima esecuzione automatica:", auto_last:"Ultima esecuzione:", auto_ok:"ok", auto_failed:"non riuscita",
+    auto_retry:"Nuovo tentativo in arrivo, ultimo errore:",
+    auto_stdin:"Pianificazione tua? Un'automazione può chiamare hassio.addon_stdin con addon: {slug} e input: generate (oppure monthly, yearly, this_month).",
     l_auto:"Generazione automatica", opt_off:"disattivato", opt_both:"mensile + annuale",
     col_entity:"entità", col_entities:"entità", col_label:"etichetta",
     col_aggregate:"aggregato", col_unit:"unità", col_scale:"fattore",
@@ -906,6 +1236,9 @@ const I18N = {
     btn_save:"Opslaan", btn_generate:"Opslaan en genereren",
     link_open:"Wrapped openen", link_download:"HTML downloaden", link_back:"← Terug",
     dash_hint:"Voor dashboards: gebruik /local/ha-wrapped/latest.html — toont altijd de nieuwste versie (geen browsercache).",
+    auto_next:"Volgende automatische run:", auto_last:"Laatste run:", auto_ok:"ok", auto_failed:"mislukt",
+    auto_retry:"Wordt opnieuw geprobeerd, laatste fout:",
+    auto_stdin:"Eigen schema? Een automatisering kan hassio.addon_stdin aanroepen met addon: {slug} en input: generate (of monthly, yearly, this_month).",
     l_auto:"Automatisch genereren", opt_off:"uit", opt_both:"maandelijks + jaarlijks",
     col_entity:"entiteit", col_entities:"entiteit(en)", col_label:"label",
     col_aggregate:"aggregaat", col_unit:"eenheid", col_scale:"factor",
@@ -934,6 +1267,9 @@ const I18N = {
     btn_save:"Guardar", btn_generate:"Guardar e gerar",
     link_open:"Abrir o wrapped", link_download:"Transferir HTML", link_back:"← Voltar",
     dash_hint:"Para painéis, incorpore /local/ha-wrapped/latest.html — mostra sempre a versão mais recente (sem cache do navegador).",
+    auto_next:"Próxima execução automática:", auto_last:"Última execução:", auto_ok:"ok", auto_failed:"falhou",
+    auto_retry:"Nova tentativa agendada, último erro:",
+    auto_stdin:"Horário próprio? Uma automação pode chamar hassio.addon_stdin com addon: {slug} e input: generate (ou monthly, yearly, this_month).",
     l_auto:"Geração automática", opt_off:"desligado", opt_both:"mensal + anual",
     col_entity:"entidade", col_entities:"entidade(s)", col_label:"rótulo",
     col_aggregate:"agregado", col_unit:"unidade", col_scale:"fator",
@@ -1130,6 +1466,38 @@ async function saveConfig(){
   const r=await fetch("api/config",{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify(collect())});
   $("status").textContent = r.ok ? t("st_saved") : t("st_savefail");
+  // the scheduler re-checks on save; give it a moment, then show the result
+  setTimeout(loadStatus, 1500);
+}
+
+// Auto-generate status line: next scheduled run, last run, pending retry,
+// plus the hassio.addon_stdin hint for people who want their own schedule.
+let STATUS = null;
+function fmtWhen(iso){
+  try{ return new Date(iso).toLocaleString(LANG,{dateStyle:"medium",timeStyle:"short"}); }
+  catch(e){ return iso; }
+}
+function renderStatus(){
+  const st = STATUS, parts = [];
+  if(st){
+    if(st.next_run) parts.push(t("auto_next")+" "+fmtWhen(st.next_run));
+    if(st.last && st.last.at)
+      parts.push(t("auto_last")+" "+fmtWhen(st.last.at)
+        +(st.last.period ? " ("+st.last.period+", " : " (")
+        +(st.last.ok ? t("auto_ok") : t("auto_failed"))+")");
+    const fails = Object.values(st.failing||{});
+    if(fails.length && fails[0].error) parts.push(t("auto_retry")+" "+fails[0].error);
+  }
+  $("auto_status").textContent = parts.join(" · ");
+  const hint = el("span");
+  hint.textContent = t("auto_stdin").replace("{slug}", (st && st.slug) || "<slug>");
+  if(parts.length) $("auto_status").append(el("br"));
+  $("auto_status").append(hint);
+}
+async function loadStatus(){
+  try{ STATUS = await fetch("api/status",{cache:"no-store"}).then(r=>r.json()); }
+  catch(e){ STATUS = null; }
+  renderStatus();
 }
 
 function showLinks(){ $("links").style.display="flex"; }
@@ -1179,6 +1547,7 @@ async function generate(){
     else $("status").textContent=t("st_failed");
   }catch(e){ $("status").textContent=t("st_error"); $("log").textContent=String(e); }
   btn.disabled=false; btn.textContent=t("btn_generate");
+  loadStatus();
 }
 
 // If a wrapped was generated in an earlier session it's still on disk, so
@@ -1215,7 +1584,7 @@ async function init(){
   if(Number.isFinite(+cfg.month) && String(cfg.month).trim()!=="") $("month").value=cfg.month;
   // switch the whole UI to the saved language, and again whenever it changes
   applyLang($("language").value || "en");
-  $("language").addEventListener("change", e => applyLang(e.target.value));
+  $("language").addEventListener("change", e => { applyLang(e.target.value); renderStatus(); });
   // same for the theme: reflect the dropdown into the config UI live
   applyTheme($("theme").value || "auto");
   $("theme").addEventListener("change", e => applyTheme(e.target.value));
@@ -1226,6 +1595,7 @@ async function init(){
   applyLang($("language").value || "en");  // re-apply for the freshly added rows
   loadEntities();
   checkExisting();
+  loadStatus();
 }
 init();
 </script>

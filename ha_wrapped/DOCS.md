@@ -83,23 +83,78 @@ aspect_ratio: 150%
 
 ## Automatic generation
 
-Set **Auto-generate** (General section) to have the add-on render the page on
-its own — no need to open it each time:
+Set **Auto-generate** (General section) and hit **Save** to have the add-on
+render the page on its own, no need to open it each time:
 
-- **monthly** — at the start of each month, renders the month that just ended.
-- **yearly** — on 1 January, renders the year that just ended.
-- **monthly + yearly** — both.
-- **off** (default) — only generate when you press Generate.
+- **monthly**: shortly after midnight on the 1st (30 minutes grace, so the
+  last hour of the month is in the statistics), renders the month that just
+  ended.
+- **yearly**: on 1 January, renders the year that just ended.
+- **monthly + yearly**: both.
+- **off** (default): only generate when you press Generate.
 
-The scheduler uses your saved config (entities, language, tone, API key…) and
-the **Timezone offset** to decide when a month/year has ended. Combined with a
-Webpage card pointing at `/local/ha-wrapped/monthly.html` or `yearly.html`,
-your dashboard updates itself.
+When you switch it on, the most recently completed month (or year) is
+rendered right away; after that it runs once per period. The scheduler uses
+your saved config (entities, language, tone, API key…) and the **Timezone
+offset** to decide when a month/year has ended. The **Period**, **Year** and
+**Month** fields only apply to the Generate button; automatic runs pick the
+period themselves.
 
-Every generate — manual (the Generate button) or automatic — updates
+Below the buttons the config page shows when the next automatic run is due
+and how the last one went. If a run fails (for example because Home
+Assistant was restarting), the error is shown there and the run is retried
+every hour (every 6 hours after six failures). The add-on log (tab **Log**)
+has the details, prefixed `[auto]`.
+
+Combined with a Webpage card pointing at `/local/ha-wrapped/monthly.html` or
+`yearly.html`, your dashboard updates itself. The add-on has to be running
+for any of this, so leave **Start on boot** on.
+
+### Your own schedule (automations)
+
+For anything the built-in schedule doesn't cover (weekly, a daily refresh of
+the current month, right after a holiday…), trigger a run from a Home
+Assistant automation with the `hassio.addon_stdin` action. The add-on's slug
+is shown on the config page (it's also in the add-on's URL, for example
+`a1b2c3d4_ha_wrapped`).
+
+```yaml
+automation:
+  - alias: "HA Wrapped: refresh the current month every night"
+    triggers:
+      - trigger: time
+        at: "03:00:00"
+    actions:
+      - action: hassio.addon_stdin
+        data:
+          addon: a1b2c3d4_ha_wrapped   # your slug
+          input: this_month
+```
+
+Supported `input` values:
+
+| input | renders |
+|---|---|
+| `generate` | same as the Generate button (saved config) |
+| `monthly` | the month that just ended |
+| `yearly` | the year that just ended |
+| `this_month` | the current month so far |
+| `this_year` | the current year so far |
+| `auto` | whatever the Auto-generate schedule still owes |
+| `{"period": "monthly", "year": 2025, "month": 8}` | the saved config with these keys overridden |
+
+`monthly`/`yearly`/`this_*` also publish `monthly.html` / `yearly.html` and a
+period-named copy (`ha_wrapped_2025-08.html`), like the automatic runs.
+Output of triggered runs lands in the add-on log prefixed `[stdin]`.
+
+### Last-run sensor
+
+Every generate (manual, automatic or triggered) updates
 `sensor.ha_wrapped_last_run` with the timestamp of that run, plus `ok`,
-`period` and `mode` attributes. Use it on a dashboard or as an automation
-trigger to know a fresh wrapped is ready without opening the add-on panel.
+`period`, `mode`, `auto_generate`, `next_run` and (on failure) `error`
+attributes. Use it on a dashboard or as an automation trigger, for example to
+get a notification when a fresh wrapped is ready. The add-on re-publishes it
+after a Home Assistant restart.
 
 ## Configuration tab
 
