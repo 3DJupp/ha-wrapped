@@ -336,13 +336,25 @@ def fetch_count(ha_url, token, entity_ids, to_state, start, end,
     series = [0] * n_periods
     for history in data:
         prev = None
-        for st in history:
+        for i, st in enumerate(history):
             state = st.get("state")
             when = st.get("last_changed") or st.get("last_updated")
+            # HA answers in UTC; bucket in the wrapped's own offset, or an
+            # event just after local midnight lands on the previous day (or,
+            # on the 1st, the previous month -- and drops out of a monthly
+            # series entirely)
+            ts = (dt.datetime.fromisoformat(when).astimezone(start.tzinfo)
+                  if when else None)
+            # the first row is the entity's state *at* `start` (HA stamps it
+            # with the window start): a baseline, not a transition inside the
+            # window -- counting it would add one phantom event whenever the
+            # entity already sat in `to_state` when the period began
+            if i == 0 and (ts is None or ts <= start):
+                prev = state
+                continue
             if state == to_state and prev != to_state:
                 count += 1
-                if when:
-                    ts = dt.datetime.fromisoformat(when)
+                if ts:
                     idx = (ts.day if period_unit == "day" else ts.month) - 1
                     if 0 <= idx < n_periods:
                         series[idx] += 1
@@ -496,7 +508,10 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
     # page can say "Jan – Jun" / "1.–13." instead of pretending the empty
     # trailing periods are zeros
     partial = end.astimezone(dt.timezone.utc) < full_end.astimezone(dt.timezone.utc)
-    periods_covered = ((end.day if mode == "monthly" else end.month)
+    # `end` is "now" in UTC for a running period; read its day/month in the
+    # wrapped's own offset so the covered range flips at local midnight
+    end_local = end.astimezone(start.tzinfo)
+    periods_covered = ((end_local.day if mode == "monthly" else end_local.month)
                        if partial else n_periods)
 
     # --- preflight: report what is configured before touching the network

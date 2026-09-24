@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.0.11
+
+- **Auto-generate is now dependable and visible.** The config page shows
+  when the next automatic run is due, how the last run went and, if a run
+  failed, the error and that it will be retried. `sensor.ha_wrapped_last_run`
+  gains `next_run`, `auto_generate` and `error` attributes, and it no longer
+  disappears after a Home Assistant restart (the add-on re-publishes it).
+- The scheduler now checks every 10 minutes instead of once an hour counted
+  from whenever the add-on started, waits 30 minutes past midnight on the 1st
+  so the last hour of the month is in the statistics, and re-checks the
+  moment you save the config. A failed run is retried hourly (6-hourly after
+  six failures) instead of silently every hour forever.
+- Fixed: an unexpected engine exit during an automatic run could stop the
+  whole add-on. Manual, automatic and triggered runs no longer overlap.
+- **New: trigger a run from an automation.** The add-on accepts commands via
+  the `hassio.addon_stdin` action (`generate`, `monthly`, `yearly`,
+  `this_month`, `this_year`, or `{"period": ..., "year": ..., "month": ...}`),
+  so any schedule HA can express works: weekly, daily refreshes of the
+  current month, after a trip. See the Documentation tab.
+- **Fixed: counts landed on the wrong day or month.** State changes were
+  bucketed by their UTC date, so an event shortly after local midnight was
+  charted on the previous day (on the 1st it dropped out of a monthly chart
+  completely). A count also picked up one phantom event when the entity was
+  already in the counted state when the period began.
+- The "covered so far" range of a running period (`1.–13.`) now flips at
+  local midnight instead of UTC midnight.
+
 ## 1.0.10
 
 - **Fixed: AI copy sometimes inflated a number by 1000x.** The Claude prompt

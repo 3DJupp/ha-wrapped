@@ -21,6 +21,15 @@ dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
   schema), `server.py` is the aiohttp Ingress server (config UI with live
   entity pickers, `/api/generate` runs the engine in a worker thread since
   it spins up its own asyncio loop, `/view`+`/download` serve the result),
+  auto-generation: `scheduler()` ticks every 10 min (and on config save),
+  `run_auto_due()` renders the latest completed month/year per
+  `auto_generate`, tracked in `/data/auto_state.json` (`m:YYYY-MM`/`y:YYYY`
+  done, `_fail` retries with backoff, `_last` for the sensor, which is
+  re-pushed each tick because REST-set states vanish on Core restart).
+  `stdin: true` + `stdin_reader()`/`run_command()` let HA automations
+  trigger runs via `hassio.addon_stdin` (JSON-encoded input, not always
+  newline-terminated). `RUN_LOCK` serializes all generate paths.
+  `/api/status` feeds the UI's next/last-run line.
   `Dockerfile`/`build.yaml`/`run.sh` build it (engine installed from git via
   the `HA_WRAPPED_REF` build arg), `DOCS.md`/`CHANGELOG.md` are add-on docs.
   `icon.png` (256x256) + `logo.png` (600x150) are the store/sidebar art (a
@@ -63,7 +72,9 @@ dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
     `minimal_response&no_attributes`; counts transitions INTO `to_state`.
     `entity_id` may be a list — counts and the per-period series are
     summed across all of them (e.g. several shutters as one stat).
-    `fetch_count()` buckets by day-of-month (monthly) or month (yearly).
+    `fetch_count()` buckets by day-of-month (monthly) or month (yearly),
+    in the wrapped's own offset (HA returns UTC). The first history row is
+    the state at `start` (a baseline), not a counted transition.
 - Payload contract for the template: see `payload = {...}` in `main()`.
   Each stat: `id, label, unit, value, decimals, display_value,
   series[n_periods], headline, quip, footnote`. `decimals` is the raw
