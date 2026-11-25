@@ -21,6 +21,8 @@
     /* vibrant Wrapped accent rotation */
     --acc0:#1db954; --acc1:#ff4f9a; --acc2:#4f7dff;
     --acc3:#ffd23f; --acc4:#b15cff; --acc5:#ff7a45;
+    --acc6:#22d3ee; --acc7:#a3e635; --acc8:#ff4d5e;
+    --acc9:#e45cf0; --acc10:#8c8cff; --acc11:#f2b880;
   }
   :root[data-theme="light"]{
     color-scheme:light;
@@ -36,6 +38,8 @@
     /* darker variants so the loud colors still read on a light ground */
     --acc0:#138a3e; --acc1:#d81f6f; --acc2:#2d57d6;
     --acc3:#b8860b; --acc4:#7c2fd6; --acc5:#d6521f;
+    --acc6:#0e8aa6; --acc7:#4d7c0f; --acc8:#d32f3f;
+    --acc9:#b02cbd; --acc10:#4f46c8; --acc11:#9a5b22;
   }
   @media (prefers-color-scheme: light){
     :root:not([data-theme="dark"]){
@@ -51,12 +55,18 @@
       --bad:#d6342a;
       --acc0:#138a3e; --acc1:#d81f6f; --acc2:#2d57d6;
       --acc3:#b8860b; --acc4:#7c2fd6; --acc5:#d6521f;
+      --acc6:#0e8aa6; --acc7:#4d7c0f; --acc8:#d32f3f;
+      --acc9:#b02cbd; --acc10:#4f46c8; --acc11:#9a5b22;
     }
   }
-  /* per-card accent: set on each .card / .stile, cascades to children */
+  /* per-card accent: set on each .card / .stile, cascades to children.
+     12 hues so a typical wrapped never shows the same color twice */
   .acc0{--accent:var(--acc0)} .acc1{--accent:var(--acc1)}
   .acc2{--accent:var(--acc2)} .acc3{--accent:var(--acc3)}
   .acc4{--accent:var(--acc4)} .acc5{--accent:var(--acc5)}
+  .acc6{--accent:var(--acc6)} .acc7{--accent:var(--acc7)}
+  .acc8{--accent:var(--acc8)} .acc9{--accent:var(--acc9)}
+  .acc10{--accent:var(--acc10)} .acc11{--accent:var(--acc11)}
   *{box-sizing:border-box;margin:0}
   html{scroll-snap-type:y mandatory}
   body{
@@ -152,6 +162,16 @@
     background:var(--bg2); border:1px solid var(--line);
     border-top:3px solid var(--accent);
     border-radius:12px; padding:22px 20px 18px; overflow:hidden;
+  }
+  /* odd tile count: the last one spans both columns, no hole in the grid */
+  /* odd tile count: the last one spans both columns, no hole in the grid.
+     Number left, chart right, so the bars keep the width of the others */
+  .summary .stile:last-child:nth-child(odd){
+    grid-column:1 / -1; flex-direction:row; align-items:stretch; gap:14px;
+  }
+  .summary .stile:last-child:nth-child(odd) .shead{flex:1 1 0; min-width:0}
+  .summary .stile:last-child:nth-child(odd) .spark.mini{
+    flex:1 1 0; min-width:0; margin:0;
   }
   .summary .snum{
     font-family:"Archivo",sans-serif; font-variation-settings:"wdth" 70;
@@ -376,9 +396,13 @@ let html = `
   <div class="hint">${esc(I.scroll)} &darr;</div>
 </section>`;
 
+// stat i gets the same accent on its own card and its recap tile; acc0
+// (the green) stays with the intro, so stats start at acc1
+const accOf = i => (i + 1) % 12;
+
 DATA.stats.forEach((s, i) => {
   html += `
-<section class="card acc${(i+1)%6}">
+<section class="card acc${accOf(i)}">
   <div class="idx">${String(i+1).padStart(2,"0")}/${String(DATA.stats.length).padStart(2,"0")}</div>
   <div class="eyebrow">${esc(s.id)}</div>
   <h2>${esc(s.headline)}</h2>
@@ -396,9 +420,11 @@ if(rendered) html += `
   <h1>${esc(I.summary_title || "Recap")}</h1>
   <div class="sgrid">
     ${DATA.stats.map((s, i) => `
-    <div class="stile acc${i%6}">
-      <div class="snum">${esc(s.display_value)}<span class="sunit">${esc(s.unit)}</span></div>
-      <div class="slabel">${esc(s.headline)}</div>
+    <div class="stile acc${accOf(i)}">
+      <div class="shead">
+        <div class="snum">${esc(s.display_value)}<span class="sunit">${esc(s.unit)}</span></div>
+        <div class="slabel">${esc(s.headline)}</div>
+      </div>
       ${chart(s.series, true)}
     </div>`).join("")}
   </div>

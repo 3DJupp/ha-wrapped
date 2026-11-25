@@ -3,8 +3,8 @@
 HA Wrapped - a Spotify-Wrapped-style year review for your Home Assistant.
 
 Pulls long-term statistics (WebSocket API) and state-change counts (REST API)
-for a configurable list of entities, optionally generates witty German copy
-via the Claude API, and renders a self-contained shareable HTML file.
+for a configurable list of entities, optionally generates witty copy (in the
+configured language) via the Claude API, and renders a self-contained shareable HTML file.
 
 Usage:
     export HA_TOKEN="<long-lived access token>"
@@ -248,8 +248,13 @@ async def list_statistic_ids(ws_url, token):
                 return msg["result"]
 
 
-def reduce_stat(rows, aggregate):
-    """Collapse monthly statistic rows into (total, monthly_series)."""
+def reduce_stat(rows, aggregate, baseline=None):
+    """Collapse monthly statistic rows into (total, monthly_series).
+
+    `baseline` (``delta`` only) is the counter reading at the end of the
+    period *before* the window. Each row's ``state`` is the reading at the
+    end of that row's period, so without it the first period has nothing to
+    subtract from and its increase is lost."""
     if not rows:
         return None, []
 
@@ -291,7 +296,7 @@ def reduce_stat(rows, aggregate):
         # coffee machine's total brew count, state_class: total_increasing)
         # rather than a recorder-tracked 'sum': the period total is the
         # last reading minus the first, not the sum of the readings.
-        series, prev = [], None
+        series, prev = [], baseline
         for r in rows:
             s = r.get("state")
             if s is None:
@@ -300,7 +305,10 @@ def reduce_stat(rows, aggregate):
             series.append(0.0 if prev is None else max(0.0, s - prev))
             prev = s
         states = [r["state"] for r in rows if r.get("state") is not None]
-        total = (states[-1] - states[0]) if len(states) >= 2 else 0.0
+        if states and baseline is not None:
+            total = states[-1] - baseline
+        else:
+            total = (states[-1] - states[0]) if len(states) >= 2 else 0.0
         return total, series
 
     raise ValueError(f"unknown aggregate: {aggregate}")
@@ -431,7 +439,7 @@ def claude_copy(stats, period_label, language="en", tone="dry, witty, deadpan",
             },
             json={
                 "model": "claude-sonnet-4-6",
-                "max_tokens": 2000,
+                "max_tokens": 4000,
                 "messages": [{"role": "user", "content": prompt}],
             },
             timeout=120,
@@ -462,6 +470,20 @@ def export_summary_png(html_path: Path, out_path: Path, width: int, height: int)
         page.goto(f"file://{html_path.resolve()}")
         page.locator(".summary").scroll_into_view_if_needed()
         page.wait_for_timeout(2500)  # let the fade-up animation settle
+        # many stats make the recap taller than the image; zoom it out to fit
+        # instead of cutting off the bottom rows
+        page.evaluate("""() => {
+            // a share image doesn't need the page's own buttons
+            for (const el of document.querySelectorAll('.theme,.dots,.dbg-btn,.dbg'))
+                el.style.display = 'none';
+            const card = document.querySelector('.summary');
+            const h = card.getBoundingClientRect().height;
+            if (h > innerHeight) {
+                document.documentElement.style.zoom = innerHeight / h;
+            }
+            card.scrollIntoView({block: 'start', behavior: 'instant'});
+        }""")
+        page.wait_for_timeout(300)
         page.screenshot(path=str(out_path))
         browser.close()
 
@@ -537,9 +559,30 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
         ids = [s["entity_id"] for s in stat_cfgs]
         log(f"Fetching long-term statistics for {len(ids)} entities ...")
         result = asyncio.run(fetch_statistics(ws_url, token, ids, start, end, stat_period))
+        # `delta` needs the counter reading from just before the window,
+        # else the first month (or day) of the period is never counted
+        baselines = {}
+        delta_ids = [s["entity_id"] for s in stat_cfgs
+                     if s.get("aggregate") == "delta"]
+        if delta_ids:
+            pre_start = ((start - dt.timedelta(days=1)).replace(day=1)
+                         if stat_period == "month"
+                         else start - dt.timedelta(days=1))
+            try:
+                pre = asyncio.run(fetch_statistics(
+                    ws_url, token, delta_ids, pre_start, start, stat_period))
+            except Exception as e:  # noqa: BLE001
+                log(f"  ! baseline for delta stats failed: {e}")
+                pre = {}
+            for eid in delta_ids:
+                states = [r["state"] for r in pre.get(eid, [])
+                          if r.get("state") is not None]
+                if states:
+                    baselines[eid] = states[-1]
         for s in stat_cfgs:
             rows = result.get(s["entity_id"], [])
-            total, series = reduce_stat(rows, s.get("aggregate", "sum"))
+            total, series = reduce_stat(rows, s.get("aggregate", "sum"),
+                                        baselines.get(s["entity_id"]))
             if debug:
                 agg = s.get("aggregate", "sum")
                 log(f"  [debug] {s['entity_id']} (aggregate={agg}, "
@@ -551,6 +594,8 @@ def collect_and_render(cfg, *, ha_url, token, ws_url, output=None,
                             ts / 1000, _tzinfo(tz)).date().isoformat()
                     log(f"    start={ts} state={r.get('state')} "
                         f"sum={r.get('sum')} change={r.get('change')}")
+                if s["entity_id"] in baselines:
+                    log(f"    baseline state={baselines[s['entity_id']]}")
                 log(f"    -> raw total={total} series={series}")
             if total is None:
                 log(f"  ! no data for {s['entity_id']}")
