@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.12
+
+- **More colors.** The wrapped page now rotates through 12 accent colors
+  instead of 6, so up to 12 stats each get their own. A stat's card and its
+  recap tile now share the same color (they used to be off by one).
+- **Recap with an odd number of stats** no longer leaves a hole: the last
+  tile spans the full width, number on the left, chart on the right.
+- `--export-summary` scales the recap down to fit the image when there are
+  many stats, instead of cutting off the bottom rows, and leaves the page
+  buttons out of the picture.
+- Fixed: `aggregate: delta` missed the first month (or day, for a monthly
+  wrapped). It now reads the counter from just before the period as the
+  starting point.
+- The witty copy request has more room, so many stats no longer risk a cut
+  off answer and a silent fallback to plain labels.
+
 ## 1.0.11
 
 - **Auto-generate is now dependable and visible.** The config page shows

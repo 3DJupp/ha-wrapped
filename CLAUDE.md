@@ -68,6 +68,9 @@ dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
     cumulative-sum deltas, `delta` uses `last_state - first_state` for
     absolute/lifetime counters (e.g. a coffee machine's total brew count
     — don't use `sum` for those, it adds the raw readings together).
+    `delta` fetches one extra period before `start` as a baseline (each
+    row's `state` is the reading at the *end* of its period), otherwise
+    the first month/day would be lost.
   - `counts:` entries -> REST `/api/history/period` with
     `minimal_response&no_attributes`; counts transitions INTO `to_state`.
     `entity_id` may be a list — counts and the per-period series are
@@ -107,8 +110,14 @@ dedicated Home Assistant **add-on** (`ha_wrapped/`) with an Ingress UI.
   built for screenshots/social sharing. `--export-summary` (in `main()`)
   uses `export_summary_png()` to screenshot just that card via Playwright;
   `--summary-size WIDTHxHEIGHT` controls the output (default `1080x1080`,
-  use `1080x1920` for a 9:16 story). Uses the same payload as the rest of
-  the page — no new fields.
+  use `1080x1920` for a 9:16 story); if the recap is taller than that it is
+  zoomed out to fit, and the page chrome (theme/dots/status buttons) is
+  hidden. Uses the same payload as the rest of the page — no new fields.
+  The grid is two columns; with an odd stat count the last tile spans both
+  (number left, chart right).
+- Accents: 12 hues (`--acc0..--acc11`, dark + darker light-theme variants,
+  defined in all three theme blocks). Stat `i` uses `accOf(i)` = `(i+1)%12`
+  on both its card and its recap tile; `acc0` (green) belongs to the intro.
 
 ## Conventions
 
